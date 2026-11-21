@@ -137,10 +137,21 @@ groups = ["root"]
 # The phone describes it in no file a recovery reads — its init script
 # declares it — so the description is written here and published as the
 # service directory starts, without which the directory refuses it.
+#
+# The folder of the installed system's libraries comes first, and the folder
+# itself rather than the bootstrap one under it: its libc++.so, at 1152760
+# bytes, carries `__libcpp_verbose_abort`, and the recovery's own, at 766960,
+# does not. ese_weaver.so reaches libhardware.so, which reaches
+# libhardware_legacy.so, which asks for that symbol, so the whole chain has to
+# be built against one runtime. Given the recovery's first the weaver ended
+# on `cannot locate symbol "__libcpp_verbose_abort"`; given only the bootstrap
+# folder it linked and then ended on signal 6, the abort that same check makes
+# at run time. Either way it never registered, and the page that asks it about
+# a slot waited on a call with no limit.
 [[service]]
 path = "/kmlibs/km.sh"
 args = ["/odm/bin/hw/android.hardware.weaver-service.nxp-qti"]
-libraries = ["/kmlibs", "/odm/lib64", "/vendor/lib64", "/system/lib64", "/mnt/system/system/lib64/bootstrap"]
+libraries = ["/mnt/system/system/lib64", "/mnt/system/system/lib64/bootstrap", "/kmlibs", "/odm/lib64", "/vendor/lib64", "/system/lib64"]
 ready_service = "android.hardware.weaver.IWeaver/default"
 manifest = '''<manifest version="1.0" type="device"><hal format="aidl"><name>android.hardware.weaver</name><version>2</version><fqname>IWeaver/default</fqname></hal></manifest>'''
 user = "root"
