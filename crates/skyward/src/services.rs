@@ -352,13 +352,13 @@ fn ready(s: &Service) -> Result<()> {
         // while the program that put it there is still running.
         if let Some(name) = &s.ready_service
             && registered(name)
-            && running(&s.path).is_some()
+            && is_running(s)
         {
             return Ok(());
         }
         if let Some(name) = &s.ready_hardware_service
             && registered_hardware(name)
-            && running(&s.path).is_some()
+            && is_running(s)
         {
             return Ok(());
         }
@@ -397,7 +397,7 @@ fn run(s: &Service, who: &Credentials, given: &Given) -> Result<String> {
     // the phone's programs. Each start keeps them in a file of its own,
     // named after the program, where a program that fails again and again
     // leaves the last of what it said rather than a wall of it.
-    let said = complaints(&s.path);
+    let said = complaints(&s.path, &s.args);
     if let Some(at) = &said
         && let Ok(file) = std::fs::OpenOptions::new().create(true).write(true).truncate(true).open(at)
     {
@@ -417,9 +417,13 @@ fn run(s: &Service, who: &Credentials, given: &Given) -> Result<String> {
 }
 
 /// Where the words a program writes as it fails are kept, one file for each
-/// program, named after the path it runs from.
-fn complaints(path: &str) -> Option<std::path::PathBuf> {
-    let name = std::path::Path::new(path).file_name()?.to_string_lossy().into_owned();
+/// program, named after the program it runs rather than the script that
+/// starts it: several programs of this phone are started through the same
+/// script, and naming the file after the script would have each of them
+/// overwrite what the one before it said.
+fn complaints(path: &str, args: &[String]) -> Option<std::path::PathBuf> {
+    let ran = args.iter().find(|arg| arg.starts_with('/')).map_or(path, String::as_str);
+    let name = std::path::Path::new(ran).file_name()?.to_string_lossy().into_owned();
     let dir = std::path::Path::new("/mnt/vendor/persist/skyward/complaints");
     let _ = std::fs::create_dir_all(dir);
     Some(dir.join(name))
@@ -559,6 +563,25 @@ pub fn running(path: &str) -> Option<u32> {
         let pid: u32 = e.file_name().to_str()?.parse().ok()?;
         (fs::read_link(e.path().join("exe")).ok()? == Path::new(path)).then_some(pid)
     })
+}
+
+/// Whether the program `s` says it will be ready with is there because `s`
+/// is running, rather than left behind by one that has ended.
+///
+/// A program started through a script is not the script once it runs: the
+/// script execs the program, and the exec replaces the process whole, its
+/// name and what it was told to run alike. Nothing of the script is left to
+/// look for, so what is looked for is the program the script ran, which is
+/// the first of the arguments that names a file.
+fn is_running(s: &Service) -> bool {
+    if running(&s.path).is_some() {
+        return true;
+    }
+    let ran = s.args.iter().find(|arg| arg.starts_with('/'));
+    match ran {
+        Some(ran) => running(ran).is_some(),
+        None => false,
+    }
 }
 
 /// Wait for a process that is not our child to exit.
