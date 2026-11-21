@@ -164,6 +164,18 @@ oneshot = true
 user = "root"
 groups = ["root"]
 
+# The secure element's own node, which the nxp-nci driver makes as it loads
+# and which the phone's init hands to nfc as it boots. In a recovery the
+# node is left root's alone, and the secure element's service runs as
+# system: without this line it cannot open the element at all, and the
+# weaver has nothing to ask for a slot. The mode and the account are the
+# ones the node has on the phone itself.
+[[owners]]
+user = "nfc"
+group = "nfc"
+mode = 0o660
+paths = ["/dev/nq-nci"]
+
 [wlan]
 modules = ["rfkill", "qca_cld3_kiwi_v2"]
 writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
