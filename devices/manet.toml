@@ -17,7 +17,7 @@ gamma = 2.2
 
 [modules]
 sources = ["vendor_boot", "vendor_dlkm", "vendor", "system_dlkm"]
-load = ["goodix_core", "xiaomi_touch"]
+load = ["goodix_core", "xiaomi_touch", "stm_nfc_i2c", "nxp-nci"]
 
 [touch]
 writes = [
@@ -118,21 +118,33 @@ ready_service = "android.hardware.boot.IBootControl/default"
 user = "root"
 groups = ["root"]
 
-# The weaver: the secure world's own gate on a screen lock, which the key
-# service asks before it uses a key that a screen lock guards. It comes after
-# the credential service, whose note it hands over, and it is the one program
-# here that may never answer: the phone is usable without it, but the user's
-# files stay shut, because their key is the one it guards. Its description
-# is the phone's own, in the vendor's file for it.
+# The weaver: the slot every user's secret is bound to on this NXP secure
+# element. Keymint wraps the keys with it, so it is the other half of the
+# way the data partition opens; where it cannot answer, the same secret's
+# other blob, the one the credential service guards, is tried instead. It
+# goes last, so that a weaver that never comes up holds nothing else back.
+#
+# It is run through the script above for two reasons, both of which it exits
+# on within a moment without. Its own library, ese_weaver.so, is built on the
+# secure element's service and on the VNDK's libhidlbase, libutils and
+# libhardware, which live on the system partition and in the apex; a program
+# of the odm partition is given a namespace of its own that does not reach
+# them, so without the linker's config the script hands it through
+# LD_CONFIG_FILE it cannot link at all. And the nxp-nci driver makes
+# /dev/nq-nci root's alone inside a recovery, where a running system gives it
+# to nfc, so it has to run as root or it cannot open the element.
+#
+# The phone describes it in no file a recovery reads — its init script
+# declares it — so the description is written here and published as the
+# service directory starts, without which the directory refuses it.
 [[service]]
-path = "/odm/bin/hw/android.hardware.weaver-service.nxp-qti"
-# It loads the VNDK's libbase and libc++ where the phone keeps them, which
-# the system partition has as well as the apex.
-libraries = ["/system/lib64", "/vendor/lib64", "/odm/lib64"]
+path = "/kmlibs/km.sh"
+args = ["/odm/bin/hw/android.hardware.weaver-service.nxp-qti"]
+libraries = ["/kmlibs", "/odm/lib64", "/vendor/lib64", "/system/lib64", "/mnt/system/system/lib64/bootstrap"]
 ready_service = "android.hardware.weaver.IWeaver/default"
-description = "/odm/etc/vintf/manifest/android.hardware.weaver-service.nxp.xml"
-user = "vendor_nxp_weaver"
-groups = ["system", "drmrpc"]
+manifest = '''<manifest version="1.0" type="device"><hal format="aidl"><name>android.hardware.weaver</name><version>2</version><fqname>IWeaver/default</fqname></hal></manifest>'''
+user = "root"
+groups = ["root", "drmrpc"]
 
 # WLAN: the kiwi node in the device tree, driven by qca_cld3_kiwi_v2, the
 # one WLAN driver the phone's own modules.load lists. The cfg80211 that
