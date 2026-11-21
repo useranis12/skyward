@@ -343,13 +343,22 @@ fn ready(s: &Service) -> Result<()> {
         }
         // Either directory may itself be starting again, and until it
         // answers nothing can be looked up in it.
+        //
+        // A program that registered and then ended leaves its name behind
+        // in the directory until that is looked at afresh, and what it
+        // registered is answered by nothing: taking the name for the
+        // program being ready says a program is there when it is not, and
+        // whoever waits on it then waits for ever. So the name counts only
+        // while the program that put it there is still running.
         if let Some(name) = &s.ready_service
             && registered(name)
+            && running(&s.path).is_some()
         {
             return Ok(());
         }
         if let Some(name) = &s.ready_hardware_service
             && registered_hardware(name)
+            && running(&s.path).is_some()
         {
             return Ok(());
         }
@@ -381,12 +390,39 @@ fn supervise(s: &Service, who: &Credentials, given: &Given) -> ! {
 /// Start the program and wait for it to end.
 fn run(s: &Service, who: &Credentials, given: &Given) -> Result<String> {
     let handed = given.make()?;
-    let mut child = command(s, who, given, &handed).spawn().with_context(|| format!("start {}", s.path))?;
+    let mut cmd = command(s, who, given, &handed);
+    // What the program says as it fails is the only account of why it did,
+    // and the recovery gives it nowhere to say it: init leaves a failing
+    // program's words in the log, but a recovery has no logd of its own for
+    // the phone's programs. Each start keeps them in a file of its own,
+    // named after the program, where a program that fails again and again
+    // leaves the last of what it said rather than a wall of it.
+    let said = complaints(&s.path);
+    if let Some(at) = &said
+        && let Ok(file) = std::fs::OpenOptions::new().create(true).write(true).truncate(true).open(at)
+    {
+        cmd.stderr(Stdio::from(file));
+    }
+    let mut child = cmd.spawn().with_context(|| format!("start {}", s.path))?;
     // The program has its sockets now, and as init does, the recovery
     // keeps none of them open itself.
     drop(handed);
     let status = child.wait().context("wait for it")?;
-    Ok(format!("pid {} ended: {status}", child.id()))
+    let told = said.and_then(|at| std::fs::read_to_string(at).ok()).unwrap_or_default();
+    let told = told.trim();
+    Ok(match told.is_empty() {
+        true => format!("pid {} ended: {status}", child.id()),
+        false => format!("pid {} ended: {status}: {told}", child.id()),
+    })
+}
+
+/// Where the words a program writes as it fails are kept, one file for each
+/// program, named after the path it runs from.
+fn complaints(path: &str) -> Option<std::path::PathBuf> {
+    let name = std::path::Path::new(path).file_name()?.to_string_lossy().into_owned();
+    let dir = std::path::Path::new("/mnt/vendor/persist/skyward/complaints");
+    let _ = std::fs::create_dir_all(dir);
+    Some(dir.join(name))
 }
 
 /// The program as it is started: with what it is given, from the top of the
