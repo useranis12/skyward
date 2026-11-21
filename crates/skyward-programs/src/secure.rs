@@ -97,8 +97,20 @@ const HARDWARE_DIRECTORY_READY: &str = "hwservicemanager.ready";
 /// and libc++.so from the bundle ended on `cannot locate symbol
 /// "__libcpp_verbose_abort"`, and one that took both from there ended on a
 /// segmentation fault. The recovery's copies are the ones that hold.
+///
+/// A program on the odm partition is the other way round, and has to be:
+/// the weaver of this phone is built against the installed system's C++
+/// runtime and cannot run on the bundle's. Its ese_weaver.so reaches
+/// libhardware.so, which reaches libhardware_legacy.so, which asks for
+/// `__libcpp_verbose_abort`; the bundle's libc++.so, at 766960 bytes, does
+/// not carry that symbol, and the installed system's, at 1152760, does. A
+/// weaver given the bundle's first ended on `cannot locate symbol
+/// "__libcpp_verbose_abort"` and never registered, which left the page
+/// that asks it about a slot waiting with nothing to wait for. Given the
+/// installed system's first it takes one runtime throughout and answers,
+/// with the rest of its libraries found beside it.
 const VENDOR_LIBRARIES: [&str; 5] = ["/vendor/lib64", "/vendor/lib64/hw", "/kmlibs", "/system/lib64", "/odm/lib64"];
-const ODM_LIBRARIES: [&str; 6] = ["/system/lib64", "/vendor/lib64", "/vendor/lib64/hw", "/odm/lib64", "/mnt/system/system/lib64", "/mnt/system/system/lib64/bootstrap"];
+const ODM_LIBRARIES: [&str; 6] = ["/mnt/system/system/lib64", "/mnt/system/system/lib64/bootstrap", "/odm/lib64", "/vendor/lib64", "/vendor/lib64/hw", "/system/lib64"];
 const SYSTEM_LIBRARIES: [&str; 3] = ["/mnt/system/system/lib64/bootstrap", "/mnt/system/system/lib64", "/mnt/system_ext/lib64"];
 
 /// The folders the program a script names `path` finds its libraries in.
