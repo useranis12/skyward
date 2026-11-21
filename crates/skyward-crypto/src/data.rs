@@ -496,21 +496,50 @@ fn open_user_files(service: &KeyMint, user: u32, credential: Option<&[u8]>, owne
     // hardware that may not answer, and its refusal is slow.
     let mut protectors = protectors(user)?;
     protectors.sort_by_key(|p| matches!(p.bound, Bound::Weaver(_)));
+    note_step(user, &format!("{} blobs to try: {}", protectors.len(), protectors.iter().map(|p| match &p.bound {
+        Bound::Weaver(slot) => format!("{} behind weaver slot {slot}", p.id),
+        Bound::Secdiscardable(_) => format!("{} secdiscardable", p.id),
+    }).collect::<Vec<_>>().join(", ")));
     let mut last = None;
     let mut why = Vec::new();
     for protector in &protectors {
+        note_step(user, &format!("trying {}", protector.id));
         match open_user_files_behind(service, user, protector, credential, owner) {
             Ok(note) => {
                 note_opened(user, protector);
+                note_step(user, &format!("{} opened it", protector.id));
                 return Ok(note);
             }
             Err(e) => {
+                note_step(user, &format!("{} did not: {e:#}", protector.id));
                 why.push(format!("{}: {e:#}", protector.id));
                 last = Some(e);
             }
         }
     }
     Err(last.with_context(|| format!("none of user {user}'s {} blobs opened ({})", protectors.len(), why.join("; ")))?)
+}
+
+/// Write a line saying how far opening a user's own files got, for a phone
+/// whose screen still says it is checking and nothing else says why: the
+/// weaver is reached over the driver, which waits for an answer for as long
+/// as the other side takes, so a weaver that never answers leaves the screen
+/// checking for ever with nothing written anywhere. The file is kept across
+/// starts, so it is cut down rather than left to grow.
+fn note_step(user: u32, what: &str) {
+    use std::io::Write;
+    let path = std::path::Path::new("/mnt/vendor/persist/skyward/decrypt-steps.txt");
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(meta) = std::fs::metadata(path)
+        && meta.len() > 16384
+    {
+        let _ = std::fs::remove_file(path);
+    }
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "user {user}: {what}");
+    }
 }
 
 /// [`open_user_files`] for one protector of the user's.
@@ -538,10 +567,16 @@ fn open_user_files_behind(
         // the secret is bound to only for the right one. The key holding
         // the secret is then guarded by nothing else.
         (Bound::Weaver(slot), _) => {
+            note_step(user, "reaching the weaver");
             let binder = Binder::open()?;
             let weaver = Weaver::open(&binder)?;
-            let key = crate::user::weaver_key(&stretched, weaver.config()?.key_bytes)?;
+            note_step(user, "asking the weaver about itself");
+            let config = weaver.config()?;
+            note_step(user, &format!("the weaver says {} slots of {} and {} bytes", config.slots, config.key_bytes, config.value_bytes));
+            let key = crate::user::weaver_key(&stretched, config.key_bytes)?;
+            note_step(user, &format!("reading slot {slot}"));
             let value = weaver.read(*slot, &key)?;
+            note_step(user, &format!("slot {slot} answered {} bytes", value.len()));
             (crate::user::weaver_protector_secret(&stretched, &value), None)
         }
         // The key holding this user's secret is guarded by the screen lock,
