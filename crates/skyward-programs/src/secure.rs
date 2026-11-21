@@ -77,8 +77,28 @@ const HARDWARE_DIRECTORY_READY: &str = "hwservicemanager.ready";
 /// the odm partition asks for that neither has. The directory for hardware
 /// services is the installed system's own program and runs on its
 /// libraries alone.
-const VENDOR_LIBRARIES: [&str; 2] = ["/system/lib64", "/vendor/lib64"];
-const ODM_LIBRARIES: [&str; 5] = ["/system/lib64", "/vendor/lib64", "/odm/lib64", "/mnt/system/system/lib64", "/mnt/system/system/lib64/bootstrap"];
+///
+/// A program on the vendor partition is given the folder the recovery keeps
+/// its own copies of the lowest libraries in, and each partition's own `hw`
+/// folder after the folder it is in, as the linker of the installed system
+/// searches it. A program built as a hardware service keeps its private
+/// libraries in that folder rather than beside the rest: the secure
+/// element's service of this phone has libEseUtils.so nowhere else, and
+/// without the folder it does not start at all, ending on the spot with
+/// `library "libEseUtils.so" not found`.
+///
+/// The installed system's own libraries are deliberately not given to a
+/// program on the vendor partition. Its libhardware.so asks for
+/// libvndksupport.so, which the bundle does not carry, and the copy the
+/// recovery keeps in the folder above answers that. Reaching for the
+/// installed system's folder instead answers it too, but brings that
+/// folder's own C++ runtime into reach, which is built differently from the
+/// one the bundle carries: a program that took libdmabufheap.so from there
+/// and libc++.so from the bundle ended on `cannot locate symbol
+/// "__libcpp_verbose_abort"`, and one that took both from there ended on a
+/// segmentation fault. The recovery's copies are the ones that hold.
+const VENDOR_LIBRARIES: [&str; 5] = ["/vendor/lib64", "/vendor/lib64/hw", "/kmlibs", "/system/lib64", "/odm/lib64"];
+const ODM_LIBRARIES: [&str; 6] = ["/system/lib64", "/vendor/lib64", "/vendor/lib64/hw", "/odm/lib64", "/mnt/system/system/lib64", "/mnt/system/system/lib64/bootstrap"];
 const SYSTEM_LIBRARIES: [&str; 3] = ["/mnt/system/system/lib64/bootstrap", "/mnt/system/system/lib64", "/mnt/system_ext/lib64"];
 
 /// The folders the program a script names `path` finds its libraries in.

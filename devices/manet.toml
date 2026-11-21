@@ -37,7 +37,7 @@ writes = [
 # LD_CONFIG_FILE, as the phone's own system starts them.
 [[service]]
 path = "/system/bin/sh"
-args = ["-c", "mkdir -p /kmlibs && cp /mnt/system/system/lib64/libhardware.so /mnt/system/system/lib64/libvndksupport.so /mnt/system/system/lib64/libnetutils.so /mnt/system/system/lib64/bootstrap/libdl_android.so /kmlibs/ && printf '[recovery]\\nnamespace.default.isolated = false\\n' > /kmlibs/ld.config.txt && printf '#!/system/bin/sh\\nexport LD_CONFIG_FILE=/kmlibs/ld.config.txt\\nexec \"$@\"\\n' > /kmlibs/km.sh && chmod 755 /kmlibs/km.sh && V=$(ls -d /system_dlkm/lib/modules/*/kernel/net/rfkill 2>/dev/null | head -1) && mount --bind $V/rfkill.ko /system_dlkm/flatten/lib/modules/rfkill.ko || true"]
+args = ["-c", "mkdir -p /kmlibs && cp /mnt/system/system/lib64/libhardware.so /mnt/system/system/lib64/libvndksupport.so /mnt/system/system/lib64/libnetutils.so /mnt/system/system/lib64/bootstrap/libdl_android.so /kmlibs/ && chmod 755 /kmlibs && chmod 644 /kmlibs/*.so && printf '[recovery]\\nnamespace.default.isolated = false\\n' > /kmlibs/ld.config.txt && chmod 644 /kmlibs/ld.config.txt && printf '#!/system/bin/sh\\nexport LD_CONFIG_FILE=/kmlibs/ld.config.txt\\nexec \"$@\"\\n' > /kmlibs/km.sh && chmod 755 /kmlibs/km.sh && V=$(ls -d /system_dlkm/lib/modules/*/kernel/net/rfkill 2>/dev/null | head -1) && mount --bind $V/rfkill.ko /system_dlkm/flatten/lib/modules/rfkill.ko || true"]
 oneshot = true
 user = "root"
 groups = ["root"]
