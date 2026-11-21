@@ -138,20 +138,25 @@ groups = ["root"]
 # declares it — so the description is written here and published as the
 # service directory starts, without which the directory refuses it.
 #
-# The folder of the installed system's libraries comes first, and the folder
-# itself rather than the bootstrap one under it: its libc++.so, at 1152760
-# bytes, carries `__libcpp_verbose_abort`, and the recovery's own, at 766960,
-# does not. ese_weaver.so reaches libhardware.so, which reaches
-# libhardware_legacy.so, which asks for that symbol, so the whole chain has to
-# be built against one runtime. Given the recovery's first the weaver ended
-# on `cannot locate symbol "__libcpp_verbose_abort"`; given only the bootstrap
-# folder it linked and then ended on signal 6, the abort that same check makes
-# at run time. Either way it never registered, and the page that asks it about
-# a slot waited on a call with no limit.
+# It is started directly, without the script above and so without the
+# linker's config. Its own library, ese_weaver.so, reaches libhardware.so and
+# libhardware_legacy.so, and the copies that hold are the ones the bundle of
+# the phone's VNDK carries: the bundle's libhardware_legacy.so is built
+# against the same C++ runtime as the recovery's own libc++.so, and the
+# installed system's is not. The folders below are the ones the bundle is
+# searched in, with the bundle itself last, where `secure::libraries` puts it.
+#
+# Two folders are deliberately left out. The installed system's own is not
+# given, though it carries a libc++.so that has `__libcpp_verbose_abort`:
+# everything else in it is a symbolic link into /apex/com.android.runtime,
+# which a recovery does not mount, so a program given that folder first cannot
+# start at all. And the linker's config is not set: a weaver started with it
+# reached past these folders into the installed system's, took the C++
+# runtime from one and libhardware_legacy.so from the other, and ended on
+# signal 6 before it registered.
 [[service]]
-path = "/kmlibs/km.sh"
-args = ["/odm/bin/hw/android.hardware.weaver-service.nxp-qti"]
-libraries = ["/mnt/system/system/lib64", "/mnt/system/system/lib64/bootstrap", "/kmlibs", "/odm/lib64", "/vendor/lib64", "/system/lib64"]
+path = "/odm/bin/hw/android.hardware.weaver-service.nxp-qti"
+libraries = ["/kmlibs", "/odm/lib64", "/vendor/lib64", "/system/lib64", "/mnt/system/system/lib64/bootstrap"]
 ready_service = "android.hardware.weaver.IWeaver/default"
 manifest = '''<manifest version="1.0" type="device"><hal format="aidl"><name>android.hardware.weaver</name><version>2</version><fqname>IWeaver/default</fqname></hal></manifest>'''
 user = "root"
