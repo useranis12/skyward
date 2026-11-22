@@ -1,9 +1,5 @@
 use crate::app::{
-    Action, AvbCheck, BackupAt, BackupEnd, BackupJob, Check, ChargeMode, ClashChoice, Confirm, Damage, Data, Dock, DownloadEnd, EraseStop, Field,
-    FileKind, FileOp, FileTask, Fetch, Fold, Folder, Frame, FsAction, FsChoice, FsRow, Have, HeroArt, Hit, ImageEnd, ImageFlow, ImageJob, Install, JobEnd, Keys, Pick,
-    Place, Rows, Screen, Serving, SkywardCheck, SkywardEnd, SkywardJob, SkywardStage, Slider, Source, State, Switch, SystemsWork, Target,
-    UsbDrive, UsbLink, Via, Wipe, ADDABLE, BACKUP_PARTS, DATA_ERASED, DATA_PARTITION, DOWNLOADS, FASTBOOT_CHOICES, SCREEN_OFF, TARGETS,
-    THERMAL_LIMIT_LEAST, THERMAL_LIMIT_MOST, TIME_ZONES, USB_DRIVE_UNREADABLE, USB_DRIVE_WANTED, WIPES, installs, starting,
+    Action, AvbCheck, BackupAt, BackupEnd, BackupJob, Check, ChargeMode, ClashChoice, Confirm, Damage, Data, Dock, DownloadEnd, EraseStop, Field,     FileKind, FileOp, FileTask, Fetch, Fold, Folder, Frame, FsAction, FsChoice, FsRow, Have, HeroArt, Hit, ImageEnd, ImageFlow, ImageJob, Install, JobEnd, Keys, Pick,     Place, Region, Rows, Screen, Serving, SkywardCheck, SkywardEnd, SkywardJob, SkywardStage, Slider, Source, State, Switch, SystemsWork, Target,     UsbDrive, UsbLink, Via, Wipe, ADDABLE, BACKUP_PARTS, DATA_ERASED, DATA_PARTITION, DOWNLOADS, FASTBOOT_CHOICES, SCREEN_OFF, TARGETS,     THERMAL_LIMIT_LEAST, THERMAL_LIMIT_MOST, TIME_ZONES, USB_DRIVE_UNREADABLE, USB_DRIVE_WANTED, WIPES, UTC, installs, listed, starting,
 };
 use crate::canvas::Canvas;
 use crate::color::Rgba;
@@ -103,6 +99,7 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::PartWork => part_work(cx),
         Screen::Language => language(cx),
         Screen::TimeZone => time_zone(cx),
+        Screen::TimeZones(region) => time_zones(cx, region),
         Screen::Logs => logs(cx),
         Screen::Update => update(cx),
         Screen::SkywardUpdate => skyward_update(cx),
@@ -455,7 +452,7 @@ pub fn settings(cx: &Ctx) -> Frame {
     y = widgets::section(&mut c, t, f, y, l.pick(["通用", "一般", "General"]));
     let general = widgets::list(&mut c, t, f, y, &[
         Row::new(l.pick(LANGUAGE)).icon(BLUE, Icon::Globe).trail(Trail::Value(l.name())),
-        Row::new(l.pick(TIME_ZONE)).icon(ORANGE, Icon::Clock).trail(Trail::Value(l.pick(TIME_ZONES[s.time_zone].0))),
+        Row::new(l.pick(TIME_ZONE)).icon(ORANGE, Icon::Clock).trail(Trail::Value(s.zone_name())),
     ]);
     out.extend(hits(&general.rows, &[Action::Open(Screen::Language), Action::Open(Screen::TimeZone)]));
     y = widgets::section(&mut c, t, f, general.bottom, "USB");
@@ -1832,7 +1829,7 @@ fn finished(
             next.bottom
         }
         Outcome::Refused(r) => {
-            let reason = fmt::refusal(l, r, &cx.info.codename, source, cx.state.time_zone);
+            let reason = fmt::refusal(l, r, &cx.info.codename, source, cx.state.zone());
             let y = widgets::list(c, t, f, top, &[standing(l.pick(["无法安装", "無法安裝", "Can't install"]), ORANGE, Icon::Install, &reason)]).bottom;
             // What the system asked for and did not go in leaves the phone
             // where it was, from which it may go back to the system.
@@ -2172,7 +2169,7 @@ pub fn restore(cx: &Ctx) -> Frame {
             .backups
             .iter()
             .map(|b| match &b.held {
-                Ok(h) => (fmt::datetime(l, h.made, s.time_zone), format!("{} · {} · {}", fmt::parts(l, &h.parts), fmt::bytes(h.size), place_name(l, b.place))),
+                Ok(h) => (fmt::datetime(l, h.made, s.zone()), format!("{} · {} · {}", fmt::parts(l, &h.parts), fmt::bytes(h.size), place_name(l, b.place))),
                 Err(_) => (b.name.clone(), format!("{} · {}", l.pick(UNREADABLE), place_name(l, b.place))),
             })
             .collect();
@@ -2214,7 +2211,7 @@ pub fn restore_backup(cx: &Ctx) -> Frame {
         }
         Ok(held) => {
             let mut facts = vec![
-                (l.pick(["备份时间", "備份時間", "Made"]), fmt::datetime(l, held.made, s.time_zone)),
+                (l.pick(["备份时间", "備份時間", "Made"]), fmt::datetime(l, held.made, s.zone())),
                 (l.pick(["大小", "大小", "Size"]), fmt::bytes(held.size)),
                 (location, place_name(l, entry.place).to_string()),
             ];
@@ -2768,7 +2765,7 @@ fn image_files_list(cx: &Ctx, c: &mut Canvas, out: &mut Vec<Hit>, y: f32) -> f32
         Ok(files) => {
             let subs: Vec<String> = files
                 .iter()
-                .map(|file| format!("{} · {} · {}", file.partition, fmt::bytes(file.size), fmt::date(l, file.made, s.time_zone)))
+                .map(|file| format!("{} · {} · {}", file.partition, fmt::bytes(file.size), fmt::date(l, file.made, s.zone())))
                 .collect();
             let shown: Vec<Row> = files.iter().zip(&subs).map(|(file, sub)| Row::new(&file.name).subtitle(sub).trail(Trail::Arrow)).collect();
             let list = widgets::list(c, t, f, y, &shown);
@@ -3521,8 +3518,8 @@ pub fn data_app_info(cx: &Ctx) -> Frame {
         (l.pick(["名称", "名稱", "Name"]), a.label.clone()),
         (l.pick(["位置", "位置", "Where"]), a.dir.clone()),
         (l.pick(["占用", "佔用", "Size"]), fmt::file_size(a.size)),
-        (l.pick(["安装", "安裝", "Installed"]), fmt::datetime(l, a.installed, s.time_zone)),
-        (l.pick(["更新", "更新", "Updated"]), fmt::datetime(l, a.updated, s.time_zone)),
+        (l.pick(["安装", "安裝", "Installed"]), fmt::datetime(l, a.installed, s.zone())),
+        (l.pick(["更新", "更新", "Updated"]), fmt::datetime(l, a.updated, s.zone())),
     ];
     let y = widgets::info_card(&mut c, t, f, top, &facts);
     // An app in the system's own partitions is not taken off from here: the
@@ -4515,7 +4512,7 @@ pub fn row(screen: Screen, cx: &Ctx, i: usize, c: &mut Canvas) {
         Screen::Files | Screen::Choose(_) => {
             let folder = cx.state.folder(screen);
             let entries = folder.entries.as_ref().expect("a folder listed draws its rows");
-            files::row(c, cx.t, cx.f, cx.state.lang, &entries[i], folder.listed, cx.state.time_zone);
+            files::row(c, cx.t, cx.f, cx.state.lang, &entries[i], folder.listed, cx.state.zone());
         }
         Screen::Installing => widgets::output_row(c, cx.t, cx.f, &cx.state.script_output, i),
         Screen::PartWork => {
@@ -4554,7 +4551,7 @@ pub fn file_info(cx: &Ctx) -> Frame {
             facts.push((l.pick(["大小", "大小", "Size"]), tr!(l, "{size}（{bytes} 字节）", "{size}（{bytes} 位元組）", "{size} ({bytes} bytes)")))
         }
     }
-    facts.push((l.pick(["修改时间", "修改時間", "Modified"]), fmt::datetime(l, e.modified, s.time_zone)));
+    facts.push((l.pick(["修改时间", "修改時間", "Modified"]), fmt::datetime(l, e.modified, s.zone())));
     let (mode, uid, gid) = (fmt::mode(e.mode), e.uid, e.gid);
     facts.push((l.pick(PERMISSIONS), tr!(l, "{mode}，所有者 {uid}，用户组 {gid}", "{mode}，擁有者 {uid}，群組 {gid}", "{mode}, owner {uid}, group {gid}")));
     let y = widgets::info_card(&mut c, t, f, top, &facts);
@@ -4819,21 +4816,60 @@ pub fn language(cx: &Ctx) -> Frame {
 }
 
 /// The time zone the status bar's clock and the times on the pages keep.
+/// On a phone whose installed system's zone is known, a switch follows it
+/// and tells which it is; a phone with no system, or one that has set no
+/// zone, shows none. Under it a zone is chosen from a part of the world,
+/// whose row names the zone kept while that is one of its own.
 pub fn time_zone(cx: &Ctx) -> Frame {
     let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
     let mut c = long_page(cx);
+    let mut out = Vec::new();
     let top = t.m.content_top;
-    let rows: Vec<Row> = TIME_ZONES
-        .iter()
-        .enumerate()
-        .map(|(k, &(name, cities, _))| Row::new(l.pick(name)).subtitle(l.pick(cities)).trail(Trail::Check(k == s.time_zone)))
-        .collect();
+    let y = match &s.system_zone {
+        Some(zone) => {
+            let name = listed(&zone.name).map_or(zone.name.as_str(), |at| l.pick(TIME_ZONES[at].name));
+            let system = format!("{} · {name}", fmt::utc_offset(s.now, &zone.rules));
+            let follow = Row::new(l.pick(["跟随系统", "跟隨系統", "Use the system's time zone"])).subtitle(&system).trail(Trail::Switch(s.follow_system_zone));
+            let follow = widgets::list(&mut c, t, f, top, &[follow]);
+            out.extend(hits(&follow.rows, &[Action::Toggle(Switch::SystemTimeZone)]));
+            widgets::section(&mut c, t, f, follow.bottom, l.pick(["选择时区", "選擇時區", "Choose a time zone"]))
+        }
+        None => top,
+    };
+    let kept = s.zone_listed();
+    let rows = Region::ALL.map(|region| {
+        let row = Row::new(l.pick(region.name()));
+        match kept.filter(|&at| TIME_ZONES[at].region == Some(region)) {
+            Some(at) => row.trail(Trail::Value(l.pick(TIME_ZONES[at].name))),
+            None => row,
+        }
+    });
+    let regions = widgets::list(&mut c, t, f, y, &rows);
+    out.extend(hits(&regions.rows, &Region::ALL.map(|region| Action::Open(Screen::TimeZones(region)))));
+    let utc = listed(UTC).expect("UTC is a zone listed");
+    let offset = fmt::utc_offset(s.now, fmt::rules(utc));
+    let universal = Row::new(l.pick(TIME_ZONES[utc].name)).subtitle(&offset).trail(Trail::Check(kept == Some(utc)));
+    let universal = widgets::list(&mut c, t, f, regions.bottom + t.m.card_gap, &[universal]);
+    out.extend(hits(&universal.rows, &[Action::TimeZone(utc)]));
+    let bottom = widgets::footnote(&mut c, t, f, universal.bottom, l.pick(["状态栏和各页面中的时间按所选时区显示。", "狀態列和各頁面中的時間按所選時區顯示。", "The status bar and the pages tell times in the zone chosen."]));
+    Frame::new(t, fit(c, t, bottom), out, l.pick(["时区", "時區", "Time zone"]), top)
+}
+
+/// The time zones of one part of the world, from the one furthest behind
+/// UTC now to the one furthest ahead, each with how far that is and the
+/// cities it is known by.
+pub fn time_zones(cx: &Ctx, region: Region) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let mut c = long_page(cx);
+    let top = t.m.content_top;
+    let mut zones: Vec<usize> = (0..TIME_ZONES.len()).filter(|&at| TIME_ZONES[at].region == Some(region)).collect();
+    zones.sort_by_key(|&at| fmt::utc_offset_seconds(s.now, fmt::rules(at)));
+    let lines: Vec<String> = zones.iter().map(|&at| format!("{} · {}", fmt::utc_offset(s.now, fmt::rules(at)), l.pick(TIME_ZONES[at].cities))).collect();
+    let kept = s.zone_listed();
+    let rows: Vec<Row> = zones.iter().zip(&lines).map(|(&at, line)| Row::new(l.pick(TIME_ZONES[at].name)).subtitle(line).trail(Trail::Check(kept == Some(at)))).collect();
     let list = widgets::list(&mut c, t, f, top, &rows);
-    let picks: Vec<Action> = (0..TIME_ZONES.len()).map(Action::TimeZone).collect();
-    let out = hits(&list.rows, &picks);
-    let note = l.pick(["状态栏和各页面中的时间按所选时区显示。", "狀態列和各頁面中的時間按所選時區顯示。", "The status bar and the pages tell times in the zone chosen."]);
-    let bottom = widgets::footnote(&mut c, t, f, list.bottom, note);
-    Frame::new(t, fit(c, t, bottom), out, l.pick(TIME_ZONE), top)
+    let picks: Vec<Action> = zones.iter().map(|&at| Action::TimeZone(at)).collect();
+    Frame::new(t, fit(c, t, list.bottom), hits(&list.rows, &picks), l.pick(region.name()), top)
 }
 
 /// Saving the logs, as a bug report asks for them.

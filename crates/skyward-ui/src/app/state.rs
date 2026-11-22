@@ -158,13 +158,25 @@ pub struct State {
     /// How long the screen stays on with nothing touched, by its place in
     /// [`SCREEN_OFF`].
     pub screen_off: usize,
-    /// The time zone the clock and the times on the pages keep, by its
-    /// place in [`TIME_ZONES`].
+    /// The clock and the times on the pages keep the time zone the
+    /// installed system is set to, where that is known.
+    pub follow_system_zone: bool,
+    /// The time zone chosen on its pages, by its place in [`TIME_ZONES`],
+    /// which the clock keeps while the system's is not followed or not
+    /// known.
     pub time_zone: usize,
     /// Whether two taps on the dark panel light it.
     pub double_tap: bool,
     /// Whether this panel can tell taps while its backlight is off.
     pub double_tap_supported: bool,
+    /// The time zone the installed system is set to, as far as it is
+    /// known: read from the data partition once it opens, and until then
+    /// the one read at an earlier start, or the one the system is built to
+    /// start in.
+    pub system_zone: Option<SystemZone>,
+    /// The time, in Unix seconds and to the minute, at which the time zone
+    /// pages tell how far each zone is from UTC.
+    pub now: i64,
     pub vibrate: bool,
     /// How strongly the motor taps, from 0 at the slider's left end to 1
     /// at its right.
@@ -439,7 +451,7 @@ impl Default for State {
             brightness: SLIDER_START,
             // Two minutes.
             screen_off: 3,
-            time_zone: 0,
+            time_zone: listed(FIRST_ZONE).expect("the first zone is one listed"),
             avatar: None,
             device_name: None,
             // The panel's controller takes no command that turns its own double
@@ -448,6 +460,9 @@ impl Default for State {
             // tapped reads as broken rather than as a setting left off.
             double_tap: true,
             double_tap_supported: false,
+            follow_system_zone: true,
+            system_zone: None,
+            now: 0,
             vibrate: true,
             vibration: SLIDER_START,
             file_transfer: true,

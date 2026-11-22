@@ -87,6 +87,17 @@ impl App {
                 self.refresh();
                 return vec![Effect::Wlan(on)];
             }
+            // The zone the system's gave the clock stays as the one chosen,
+            // where it is one the pages list.
+            Action::Toggle(Switch::SystemTimeZone) => {
+                if self.state.follow_system_zone
+                    && let Some(at) = self.state.zone_listed()
+                {
+                    self.state.time_zone = at;
+                }
+                self.state.follow_system_zone = !self.state.follow_system_zone;
+                self.refresh();
+            }
             Action::Toggle(switch) => {
                 // A charge step is chosen, not switched: tapping the one that
                 // is already chosen does nothing. The programs that settle how
@@ -130,7 +141,7 @@ impl App {
                     Switch::KeepRecovery => &mut self.state.keep_recovery,
                     Switch::ShowPassword => &mut self.state.show_password,
                     Switch::ThermalGuard => &mut self.state.thermal_guard,
-                    Switch::Wlan => unreachable!("the WLAN switch is turned above"),
+                    Switch::Wlan | Switch::SystemTimeZone => unreachable!("the switch is turned above"),
                     Switch::ChargeStep(_) => unreachable!("a charge step is chosen above"),
                     Switch::UpdateVia(_) => unreachable!("where to look for a new version is chosen above"),
                 };
@@ -322,6 +333,7 @@ impl App {
             }
             Action::TimeZone(k) => {
                 self.state.time_zone = k;
+                self.state.follow_system_zone = false;
                 self.refresh();
             }
             Action::Language(l) => {

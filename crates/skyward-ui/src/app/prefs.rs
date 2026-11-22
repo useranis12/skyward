@@ -2,6 +2,8 @@
 //! the language, the time zone, and how long the screen stays on.
 
 use super::*;
+use anyhow::{Context, Result};
+use jiff::tz::TimeZone;
 
 /// The settings' sliders.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,28 +53,341 @@ pub enum Switch {
     /// does nothing. It takes effect on the next download, so a change
     /// made while one runs is not a source list under it.
     UpdateVia(Via),
+    /// Keep the time zone the installed system is set to.
+    SystemTimeZone,
 }
 
 /// How long the screen stays on with nothing touched, in milliseconds, in
 /// the order the page lists them; `None` keeps it on.
 pub const SCREEN_OFF: [Option<u64>; 7] = [Some(15_000), Some(30_000), Some(60_000), Some(120_000), Some(300_000), Some(600_000), None];
 
-/// The time zones the clock and the times on the pages can keep, in the
-/// order their page lists them: the name, the cities it covers, and the
-/// zone's name in the tz database.
-pub const TIME_ZONES: [(Text, Text, &str); 9] = [
-    (["中国标准时间", "中國標準時間", "China Standard Time"], ["北京、上海", "北京、上海", "Beijing, Shanghai"], "Asia/Shanghai"),
-    (["香港时间", "香港時間", "Hong Kong Time"], ["香港", "香港", "Hong Kong"], "Asia/Hong_Kong"),
-    (["台北时间", "台北時間", "Taipei Time"], ["台北", "台北", "Taipei"], "Asia/Taipei"),
-    (["日本标准时间", "日本標準時間", "Japan Standard Time"], ["东京", "東京", "Tokyo"], "Asia/Tokyo"),
-    (["协调世界时", "世界標準時間", "Coordinated Universal Time"], ["UTC", "UTC", "UTC"], "UTC"),
-    (["英国时间", "英國時間", "British Time"], ["伦敦", "倫敦", "London"], "Europe/London"),
-    (["中欧时间", "中歐時間", "Central European Time"], ["柏林、巴黎", "柏林、巴黎", "Berlin, Paris"], "Europe/Berlin"),
-    (["美国东部时间", "美國東部時間", "Eastern Time"], ["纽约", "紐約", "New York"], "America/New_York"),
-    (["美国太平洋时间", "美國太平洋時間", "Pacific Time"], ["洛杉矶", "洛杉磯", "Los Angeles"], "America/Los_Angeles"),
-];
+/// A part of the world the time zone page lists its zones under.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Region {
+    Americas,
+    EuropeAfrica,
+    /// Eleven zones of one country, which its people look for under it.
+    Russia,
+    Asia,
+    Oceania,
+}
+
+impl Region {
+    /// The regions, in the order the time zone page lists them.
+    pub const ALL: [Region; 5] = [Region::Americas, Region::EuropeAfrica, Region::Russia, Region::Asia, Region::Oceania];
+
+    pub fn name(self) -> Text {
+        match self {
+            Region::Americas => ["美洲", "美洲", "Americas"],
+            Region::EuropeAfrica => ["欧洲和非洲", "歐洲和非洲", "Europe and Africa"],
+            Region::Russia => ["俄罗斯", "俄羅斯", "Russia"],
+            Region::Asia => ["亚洲", "亞洲", "Asia"],
+            Region::Oceania => ["大洋洲", "大洋洲", "Oceania"],
+        }
+    }
+}
+
+/// A time zone the clock and the times on the pages can keep.
+#[derive(Clone, Copy, Debug)]
+pub struct Zone {
+    pub name: Text,
+    /// The cities it is known by.
+    pub cities: Text,
+    /// Its name in the tz database, whose rules it keeps.
+    pub tz: &'static str,
+    /// The other names in the tz database whose places keep the same time
+    /// under the zone's name: a system set to one of them shows as the
+    /// zone, and keeps the rules of the name it is set to.
+    pub also: &'static [&'static str],
+    /// The part of the world its page lists it under; none for the one
+    /// zone that is no place's own.
+    pub region: Option<Region>,
+}
+
+const fn zone(region: Region, name: Text, cities: Text, tz: &'static str, also: &'static [&'static str]) -> Zone {
+    Zone { name, cities, tz, also, region: Some(region) }
+}
+
+/// The time zones the clock and the times on the pages can keep, each
+/// region's from west to east.
+pub static TIME_ZONES: [Zone; 62] = {
+    use Region::{Americas, Asia, EuropeAfrica, Oceania, Russia};
+    [
+        zone(Americas, ["夏威夷时间", "夏威夷時間", "Hawaii Time"], ["檀香山", "檀香山", "Honolulu"], "Pacific/Honolulu", &[]),
+        zone(Americas, ["阿拉斯加时间", "阿拉斯加時間", "Alaska Time"], ["安克雷奇", "安克拉治", "Anchorage"], "America/Anchorage", &["America/Juneau", "America/Sitka", "America/Nome"]),
+        zone(Americas, ["美国太平洋时间", "美國太平洋時間", "Pacific Time"], ["洛杉矶", "洛杉磯", "Los Angeles"], "America/Los_Angeles", &["America/Tijuana"]),
+        zone(Americas, ["美国山地时间", "美國山區時間", "Mountain Time"], ["丹佛", "丹佛", "Denver"], "America/Denver", &["America/Boise"]),
+        zone(Americas, ["美国中部时间", "美國中部時間", "Central Time"], ["芝加哥", "芝加哥", "Chicago"], "America/Chicago", &["America/Menominee"]),
+        zone(Americas, ["墨西哥时间", "墨西哥時間", "Mexico Time"], ["墨西哥城", "墨西哥城", "Mexico City"], "America/Mexico_City", &["America/Monterrey", "America/Merida"]),
+        zone(Americas, ["美国东部时间", "美國東部時間", "Eastern Time"], ["纽约", "紐約", "New York"], "America/New_York", &["America/Toronto", "America/Detroit"]),
+        zone(Americas, ["哥伦比亚时间", "哥倫比亞時間", "Colombia Time"], ["波哥大", "波哥大", "Bogotá"], "America/Bogota", &[]),
+        zone(Americas, ["秘鲁时间", "秘魯時間", "Peru Time"], ["利马", "利馬", "Lima"], "America/Lima", &[]),
+        zone(Americas, ["委内瑞拉时间", "委內瑞拉時間", "Venezuela Time"], ["加拉加斯", "卡拉卡斯", "Caracas"], "America/Caracas", &[]),
+        zone(Americas, ["亚马逊时间", "亞馬遜時間", "Amazon Time"], ["马瑙斯", "瑪瑙斯", "Manaus"], "America/Manaus", &["America/Porto_Velho", "America/Boa_Vista", "America/Cuiaba", "America/Campo_Grande"]),
+        zone(Americas, ["智利时间", "智利時間", "Chile Time"], ["圣地亚哥", "聖地牙哥", "Santiago"], "America/Santiago", &[]),
+        zone(
+            Americas,
+            ["巴西利亚时间", "巴西利亞時間", "Brasília Time"],
+            ["圣保罗、里约热内卢", "聖保羅、里約熱內盧", "São Paulo, Rio de Janeiro"],
+            "America/Sao_Paulo",
+            &["America/Bahia", "America/Fortaleza", "America/Recife", "America/Belem", "America/Maceio", "America/Araguaina", "America/Santarem"],
+        ),
+        zone(
+            Americas,
+            ["阿根廷时间", "阿根廷時間", "Argentina Time"],
+            ["布宜诺斯艾利斯", "布宜諾斯艾利斯", "Buenos Aires"],
+            "America/Argentina/Buenos_Aires",
+            &["America/Buenos_Aires", "America/Argentina/Cordoba", "America/Cordoba", "America/Argentina/Mendoza", "America/Mendoza"],
+        ),
+        zone(EuropeAfrica, ["英国时间", "英國時間", "British Time"], ["伦敦", "倫敦", "London"], "Europe/London", &["Europe/Belfast", "Europe/Jersey", "Europe/Guernsey", "Europe/Isle_of_Man"]),
+        zone(
+            EuropeAfrica,
+            ["中欧时间", "中歐時間", "Central European Time"],
+            ["柏林、巴黎", "柏林、巴黎", "Berlin, Paris"],
+            "Europe/Berlin",
+            &[
+                "Europe/Paris",
+                "Europe/Rome",
+                "Europe/Madrid",
+                "Europe/Warsaw",
+                "Europe/Amsterdam",
+                "Europe/Brussels",
+                "Europe/Vienna",
+                "Europe/Zurich",
+                "Europe/Prague",
+                "Europe/Budapest",
+                "Europe/Stockholm",
+                "Europe/Oslo",
+                "Europe/Copenhagen",
+                "Europe/Belgrade",
+                "Europe/Zagreb",
+                "Europe/Ljubljana",
+                "Europe/Bratislava",
+                "Europe/Luxembourg",
+                "Europe/Malta",
+                "Europe/Monaco",
+                "Europe/Tirane",
+                "Europe/Sarajevo",
+                "Europe/Skopje",
+                "Europe/Podgorica",
+                "Europe/Vaduz",
+                "Europe/Andorra",
+                "Europe/San_Marino",
+                "Europe/Vatican",
+                "Europe/Busingen",
+                "Europe/Gibraltar",
+            ],
+        ),
+        zone(
+            EuropeAfrica,
+            ["西部非洲时间", "西非時間", "West Africa Time"],
+            ["拉各斯", "拉哥斯", "Lagos"],
+            "Africa/Lagos",
+            &[
+                "Africa/Kinshasa",
+                "Africa/Luanda",
+                "Africa/Douala",
+                "Africa/Libreville",
+                "Africa/Niamey",
+                "Africa/Ndjamena",
+                "Africa/Brazzaville",
+                "Africa/Bangui",
+                "Africa/Malabo",
+                "Africa/Porto-Novo",
+            ],
+        ),
+        zone(
+            EuropeAfrica,
+            ["东欧时间", "東歐時間", "Eastern European Time"],
+            ["基辅、雅典", "基輔、雅典", "Kyiv, Athens"],
+            "Europe/Kyiv",
+            &[
+                "Europe/Kiev",
+                "Europe/Athens",
+                "Europe/Helsinki",
+                "Europe/Bucharest",
+                "Europe/Sofia",
+                "Europe/Riga",
+                "Europe/Vilnius",
+                "Europe/Tallinn",
+                "Europe/Mariehamn",
+                "Asia/Nicosia",
+                "Europe/Nicosia",
+                "Europe/Uzhgorod",
+                "Europe/Zaporozhye",
+            ],
+        ),
+        zone(EuropeAfrica, ["埃及时间", "埃及時間", "Egypt Time"], ["开罗", "開羅", "Cairo"], "Africa/Cairo", &[]),
+        zone(EuropeAfrica, ["南非标准时间", "南非標準時間", "South Africa Standard Time"], ["约翰内斯堡", "約翰尼斯堡", "Johannesburg"], "Africa/Johannesburg", &["Africa/Maseru", "Africa/Mbabane"]),
+        zone(EuropeAfrica, ["土耳其时间", "土耳其時間", "Türkiye Time"], ["伊斯坦布尔", "伊斯坦堡", "Istanbul"], "Europe/Istanbul", &["Asia/Istanbul", "Turkey"]),
+        zone(
+            EuropeAfrica,
+            ["东部非洲时间", "東非時間", "East Africa Time"],
+            ["内罗毕", "奈洛比", "Nairobi"],
+            "Africa/Nairobi",
+            &["Africa/Addis_Ababa", "Africa/Dar_es_Salaam", "Africa/Kampala", "Africa/Mogadishu", "Africa/Djibouti", "Africa/Asmara"],
+        ),
+        zone(Russia, ["加里宁格勒时间", "加里寧格勒時間", "Kaliningrad Time"], ["加里宁格勒", "加里寧格勒", "Kaliningrad"], "Europe/Kaliningrad", &[]),
+        zone(Russia, ["莫斯科时间", "莫斯科時間", "Moscow Time"], ["莫斯科、圣彼得堡", "莫斯科、聖彼得堡", "Moscow, Saint Petersburg"], "Europe/Moscow", &["Europe/Kirov", "Europe/Volgograd", "W-SU"]),
+        zone(Russia, ["萨马拉时间", "薩馬拉時間", "Samara Time"], ["萨马拉", "薩馬拉", "Samara"], "Europe/Samara", &["Europe/Astrakhan", "Europe/Saratov", "Europe/Ulyanovsk"]),
+        zone(Russia, ["叶卡捷琳堡时间", "葉卡捷琳堡時間", "Yekaterinburg Time"], ["叶卡捷琳堡", "葉卡捷琳堡", "Yekaterinburg"], "Asia/Yekaterinburg", &[]),
+        zone(Russia, ["鄂木斯克时间", "鄂木斯克時間", "Omsk Time"], ["鄂木斯克", "鄂木斯克", "Omsk"], "Asia/Omsk", &[]),
+        zone(Russia, ["克拉斯诺亚尔斯克时间", "克拉斯諾亞爾斯克時間", "Krasnoyarsk Time"], ["克拉斯诺亚尔斯克、新西伯利亚", "克拉斯諾亞爾斯克、新西伯利亞", "Krasnoyarsk, Novosibirsk"], "Asia/Krasnoyarsk", &["Asia/Novosibirsk", "Asia/Novokuznetsk", "Asia/Barnaul", "Asia/Tomsk"]),
+        zone(Russia, ["伊尔库茨克时间", "伊爾庫次克時間", "Irkutsk Time"], ["伊尔库茨克", "伊爾庫次克", "Irkutsk"], "Asia/Irkutsk", &[]),
+        zone(Russia, ["雅库茨克时间", "雅庫次克時間", "Yakutsk Time"], ["雅库茨克", "雅庫次克", "Yakutsk"], "Asia/Yakutsk", &["Asia/Chita", "Asia/Khandyga"]),
+        zone(Russia, ["海参崴时间", "海參崴時間", "Vladivostok Time"], ["海参崴", "海參崴", "Vladivostok"], "Asia/Vladivostok", &["Asia/Ust-Nera"]),
+        zone(Russia, ["马加丹时间", "馬加丹時間", "Magadan Time"], ["马加丹", "馬加丹", "Magadan"], "Asia/Magadan", &["Asia/Sakhalin", "Asia/Srednekolymsk"]),
+        zone(Russia, ["堪察加时间", "堪察加時間", "Kamchatka Time"], ["堪察加彼得罗巴甫洛夫斯克", "堪察加彼得巴甫洛夫斯克", "Petropavlovsk-Kamchatsky"], "Asia/Kamchatka", &["Asia/Anadyr"]),
+        zone(Asia, ["以色列时间", "以色列時間", "Israel Time"], ["耶路撒冷", "耶路撒冷", "Jerusalem"], "Asia/Jerusalem", &["Asia/Tel_Aviv", "Israel"]),
+        zone(Asia, ["阿拉伯标准时间", "阿拉伯標準時間", "Arabia Standard Time"], ["利雅得", "利雅德", "Riyadh"], "Asia/Riyadh", &["Asia/Kuwait", "Asia/Qatar", "Asia/Bahrain", "Asia/Baghdad", "Asia/Aden"]),
+        zone(Asia, ["伊朗标准时间", "伊朗標準時間", "Iran Standard Time"], ["德黑兰", "德黑蘭", "Tehran"], "Asia/Tehran", &["Iran"]),
+        zone(Asia, ["海湾标准时间", "波斯灣標準時間", "Gulf Standard Time"], ["迪拜", "杜拜", "Dubai"], "Asia/Dubai", &["Asia/Muscat"]),
+        zone(Asia, ["巴基斯坦标准时间", "巴基斯坦標準時間", "Pakistan Standard Time"], ["卡拉奇", "喀拉蚩", "Karachi"], "Asia/Karachi", &[]),
+        zone(Asia, ["乌兹别克斯坦时间", "烏茲別克時間", "Uzbekistan Time"], ["塔什干", "塔什干", "Tashkent"], "Asia/Tashkent", &["Asia/Samarkand"]),
+        zone(
+            Asia,
+            ["哈萨克斯坦时间", "哈薩克時間", "Kazakhstan Time"],
+            ["阿拉木图、阿斯塔纳", "阿拉木圖、阿斯塔納", "Almaty, Astana"],
+            "Asia/Almaty",
+            &["Asia/Qyzylorda", "Asia/Aqtobe", "Asia/Aqtau", "Asia/Atyrau", "Asia/Oral", "Asia/Qostanay"],
+        ),
+        zone(Asia, ["印度标准时间", "印度標準時間", "India Standard Time"], ["新德里、孟买", "新德里、孟買", "New Delhi, Mumbai"], "Asia/Kolkata", &["Asia/Calcutta"]),
+        zone(Asia, ["尼泊尔时间", "尼泊爾時間", "Nepal Time"], ["加德满都", "加德滿都", "Kathmandu"], "Asia/Kathmandu", &["Asia/Katmandu"]),
+        zone(Asia, ["孟加拉时间", "孟加拉時間", "Bangladesh Time"], ["达卡", "達卡", "Dhaka"], "Asia/Dhaka", &["Asia/Dacca"]),
+        zone(Asia, ["缅甸时间", "緬甸時間", "Myanmar Time"], ["仰光", "仰光", "Yangon"], "Asia/Yangon", &["Asia/Rangoon"]),
+        zone(Asia, ["印度支那时间", "中南半島時間", "Indochina Time"], ["曼谷、河内", "曼谷、河內", "Bangkok, Hanoi"], "Asia/Bangkok", &["Asia/Ho_Chi_Minh", "Asia/Saigon", "Asia/Phnom_Penh", "Asia/Vientiane"]),
+        zone(Asia, ["印度尼西亚西部时间", "印尼西部時間", "Western Indonesia Time"], ["雅加达", "雅加達", "Jakarta"], "Asia/Jakarta", &["Asia/Pontianak"]),
+        zone(Asia, ["中国标准时间", "中國標準時間", "China Standard Time"], ["北京、上海", "北京、上海", "Beijing, Shanghai"], "Asia/Shanghai", &["Asia/Chongqing", "Asia/Chungking", "Asia/Harbin", "PRC"]),
+        zone(Asia, ["香港时间", "香港時間", "Hong Kong Time"], ["香港", "香港", "Hong Kong"], "Asia/Hong_Kong", &["Hongkong"]),
+        zone(Asia, ["台北时间", "台北時間", "Taipei Time"], ["台北", "台北", "Taipei"], "Asia/Taipei", &["ROC"]),
+        zone(Asia, ["新加坡时间", "新加坡時間", "Singapore Time"], ["新加坡、吉隆坡", "新加坡、吉隆坡", "Singapore, Kuala Lumpur"], "Asia/Singapore", &["Asia/Kuala_Lumpur", "Asia/Kuching", "Singapore"]),
+        zone(Asia, ["菲律宾时间", "菲律賓時間", "Philippine Time"], ["马尼拉", "馬尼拉", "Manila"], "Asia/Manila", &[]),
+        zone(Asia, ["印度尼西亚中部时间", "印尼中部時間", "Central Indonesia Time"], ["望加锡、登巴萨", "望加錫、登巴薩", "Makassar, Denpasar"], "Asia/Makassar", &["Asia/Ujung_Pandang"]),
+        zone(Asia, ["日本标准时间", "日本標準時間", "Japan Standard Time"], ["东京", "東京", "Tokyo"], "Asia/Tokyo", &["Japan"]),
+        zone(Asia, ["韩国标准时间", "韓國標準時間", "Korea Standard Time"], ["首尔", "首爾", "Seoul"], "Asia/Seoul", &["ROK"]),
+        zone(Asia, ["印度尼西亚东部时间", "印尼東部時間", "Eastern Indonesia Time"], ["查亚普拉", "查亞普拉", "Jayapura"], "Asia/Jayapura", &[]),
+        zone(Oceania, ["澳大利亚西部时间", "澳洲西部時間", "Australian Western Time"], ["珀斯", "伯斯", "Perth"], "Australia/Perth", &["Australia/West"]),
+        zone(Oceania, ["澳大利亚中部标准时间", "澳洲中部標準時間", "Australian Central Standard Time"], ["达尔文", "達爾文", "Darwin"], "Australia/Darwin", &["Australia/North"]),
+        zone(Oceania, ["澳大利亚中部时间", "澳洲中部時間", "Australian Central Time"], ["阿德莱德", "阿得雷德", "Adelaide"], "Australia/Adelaide", &["Australia/South", "Australia/Broken_Hill"]),
+        zone(Oceania, ["澳大利亚东部标准时间", "澳洲東部標準時間", "Australian Eastern Standard Time"], ["布里斯班", "布里斯本", "Brisbane"], "Australia/Brisbane", &["Australia/Queensland", "Australia/Lindeman"]),
+        zone(
+            Oceania,
+            ["澳大利亚东部时间", "澳洲東部時間", "Australian Eastern Time"],
+            ["悉尼、墨尔本", "雪梨、墨爾本", "Sydney, Melbourne"],
+            "Australia/Sydney",
+            &["Australia/Melbourne", "Australia/Canberra", "Australia/Hobart", "Australia/ACT", "Australia/NSW", "Australia/Victoria", "Australia/Tasmania"],
+        ),
+        zone(Oceania, ["新西兰时间", "紐西蘭時間", "New Zealand Time"], ["奥克兰", "奧克蘭", "Auckland"], "Pacific/Auckland", &["NZ"]),
+        Zone {
+            name: ["协调世界时", "世界標準時間", "Coordinated Universal Time"],
+            cities: same("UTC"),
+            tz: UTC,
+            also: &["Etc/UTC", "Etc/UCT", "UCT", "Etc/Universal", "Universal", "Etc/Zulu", "Zulu", "Etc/GMT", "GMT", "Etc/Greenwich", "Greenwich"],
+            region: None,
+        },
+    ]
+};
+
+/// The name of Coordinated Universal Time in the tz database.
+pub const UTC: &str = "UTC";
+
+/// The zone the clock keeps until the installed system's is known or
+/// another is chosen, by its name in the tz database.
+pub const FIRST_ZONE: &str = "Asia/Shanghai";
+
+/// Where the zone the tz database names `tz` is in [`TIME_ZONES`], by its
+/// own name or one of those that keep its time under its name.
+pub fn listed(tz: &str) -> Option<usize> {
+    TIME_ZONES.iter().position(|zone| zone.tz == tz || zone.also.contains(&tz))
+}
+
+/// The time zone the installed system is set to.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SystemZone {
+    /// Its name in the tz database.
+    pub name: String,
+    pub rules: TimeZone,
+}
+
+impl SystemZone {
+    /// The zone the tz database names `name`, with the rules the recovery
+    /// carries for it.
+    pub fn named(name: &str) -> Result<SystemZone> {
+        let rules = TimeZone::get(name).with_context(|| format!("the recovery carries no rules for the time zone {name:?}"))?;
+        Ok(SystemZone { name: name.to_string(), rules })
+    }
+}
+
+impl State {
+    /// The installed system's time zone, while the clock keeps it.
+    pub fn followed(&self) -> Option<&SystemZone> {
+        self.system_zone.as_ref().filter(|_| self.follow_system_zone)
+    }
+
+    /// The rules of the zone the clock and the times on the pages keep:
+    /// the installed system's while it is followed and known, and the one
+    /// chosen otherwise.
+    pub fn zone(&self) -> &TimeZone {
+        match self.followed() {
+            Some(system) => &system.rules,
+            None => fmt::rules(self.time_zone),
+        }
+    }
+
+    /// Where the zone the clock keeps is in [`TIME_ZONES`]; none for a
+    /// zone of the installed system's that is not listed.
+    pub fn zone_listed(&self) -> Option<usize> {
+        match self.followed() {
+            Some(system) => listed(&system.name),
+            None => Some(self.time_zone),
+        }
+    }
+
+    /// What the zone the clock keeps is called: its name where it is
+    /// listed, and otherwise the name the tz database gives it.
+    pub fn zone_name(&self) -> &str {
+        match (self.zone_listed(), self.followed()) {
+            (Some(at), _) => self.lang.pick(TIME_ZONES[at].name),
+            (None, Some(system)) => &system.name,
+            (None, None) => unreachable!("a zone chosen is one listed"),
+        }
+    }
+}
 
 impl App {
+    /// The installed system is set to the time zone the tz database names
+    /// `name`: the clock keeps it while the system's zone is followed.
+    pub fn set_system_zone(&mut self, name: &str) -> Result<()> {
+        let zone = SystemZone::named(name)?;
+        if self.state.system_zone.as_ref() != Some(&zone) {
+            self.state.system_zone = Some(zone);
+            self.refresh();
+        }
+        Ok(())
+    }
+
+    /// The time is `unix`, in Unix seconds. The time zone pages tell how
+    /// far each zone is from UTC now, to the minute, and are drawn again
+    /// when a zone's clocks go forward or back.
+    pub fn set_now(&mut self, unix: i64) {
+        let minute = unix - unix.rem_euclid(60);
+        if minute == self.state.now {
+            return;
+        }
+        let before = self.offsets();
+        self.state.now = minute;
+        if matches!(self.screen(), Screen::TimeZone | Screen::TimeZones(_)) && self.offsets() != before {
+            self.refresh();
+        }
+    }
+
+    /// How far from UTC each zone the time zone pages tell of is now.
+    fn offsets(&self) -> Vec<i32> {
+        let now = self.state.now;
+        let listed = (0..TIME_ZONES.len()).map(|at| fmt::utc_offset_seconds(now, fmt::rules(at)));
+        listed.chain(self.state.system_zone.iter().map(|system| fmt::utc_offset_seconds(now, &system.rules))).collect()
+    }
+
     pub(super) fn set_slider(&mut self, t: &Theme, which: Slider, track: Rect, x: f32) {
         self.set_level(t, which, track, (x - track.x) / track.w);
     }
@@ -278,17 +593,106 @@ mod tests {
         assert!(tap(&mut app, &f, &i, Action::ExportLogs).is_empty(), "nothing ticked, nothing saved");
     }
 
+    /// Where a zone is in [`TIME_ZONES`], by its name in the tz database.
+    fn zone(tz: &str) -> usize {
+        listed(tz).expect("a zone listed")
+    }
+
+    /// 2026-01-15 12:00 UTC, and 2026-07-01 12:00 UTC.
+    const WINTER: i64 = 1_768_478_400;
+    const SUMMER: i64 = 1_782_907_200;
+
+    /// Whether the page shown has a control that does `action`.
+    fn offers(app: &mut App, f: &Fonts, i: &DeviceInfo, action: Action) -> bool {
+        app.frame(f, i).hits.iter().any(|h| h.action == action)
+    }
+
     #[test]
-    fn a_time_zone_chosen_is_the_one_kept() {
+    fn a_time_zone_chosen_from_its_part_of_the_world_is_the_one_kept() {
         let (f, i) = (fonts(), info());
         let mut app = App::new(Screen::Settings, W, H, PPD);
+        app.set_now(WINTER);
         tap(&mut app, &f, &i, Action::Open(Screen::TimeZone));
-        assert_eq!(app.state.time_zone, 0, "China until another is chosen");
-        let london = TIME_ZONES.iter().position(|&(_, _, name)| name == "Europe/London").expect("London is listed");
-        tap(&mut app, &f, &i, Action::TimeZone(london));
-        assert_eq!(app.state.time_zone, london);
-        tap(&mut app, &f, &i, Action::TimeZone(0));
-        assert_eq!(app.state.time_zone, 0, "and China again");
+        assert_eq!(app.state.time_zone, zone("Asia/Shanghai"), "China until another is chosen");
+        assert!(!offers(&mut app, &f, &i, Action::Toggle(Switch::SystemTimeZone)), "a phone with no system has no zone of its own to follow");
+        tap(&mut app, &f, &i, Action::Open(Screen::TimeZones(Region::EuropeAfrica)));
+        tap(&mut app, &f, &i, Action::TimeZone(zone("Europe/London")));
+        assert_eq!((app.state.time_zone, app.screen()), (zone("Europe/London"), Screen::TimeZones(Region::EuropeAfrica)), "the page stays");
+        assert_eq!(fmt::clock(WINTER, app.state.zone()), "12:00");
+        tap_back(&mut app, &f, &i, 1000);
+        tap_at(&mut app, &f, &i, Action::TimeZone(zone(UTC)), 2000);
+        assert_eq!(app.state.zone_name(), "协调世界时");
+    }
+
+    #[test]
+    fn the_system_s_time_zone_is_followed_until_another_is_chosen() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::TimeZone, W, H, PPD);
+        app.set_now(SUMMER);
+        app.set_system_zone("Europe/Rome").unwrap();
+        assert_eq!(app.state.zone_listed(), Some(zone("Europe/Berlin")), "Rome keeps Central European Time");
+        assert_eq!(app.state.zone_name(), "中欧时间");
+        assert_eq!(fmt::clock(SUMMER, app.state.zone()), "14:00");
+        // Turned off, the switch leaves the clock in the zone it kept.
+        tap(&mut app, &f, &i, Action::Toggle(Switch::SystemTimeZone));
+        assert!(!app.state.follow_system_zone);
+        assert_eq!(app.state.time_zone, zone("Europe/Berlin"));
+        assert_eq!(fmt::clock(SUMMER, app.state.zone()), "14:00");
+        tap_at(&mut app, &f, &i, Action::TimeZone(zone(UTC)), 1000);
+        assert_eq!(fmt::clock(SUMMER, app.state.zone()), "12:00");
+        tap_at(&mut app, &f, &i, Action::Toggle(Switch::SystemTimeZone), 2000);
+        assert!(app.state.follow_system_zone);
+        assert_eq!(fmt::clock(SUMMER, app.state.zone()), "14:00", "Rome's again");
+        tap_at(&mut app, &f, &i, Action::TimeZone(zone(UTC)), 3000);
+        assert!(!app.state.follow_system_zone, "a zone chosen is kept in place of the system's");
+    }
+
+    #[test]
+    fn a_zone_of_the_system_s_that_is_not_listed_is_kept_under_its_own_name() {
+        let mut app = App::new(Screen::TimeZone, W, H, PPD);
+        app.set_system_zone("Asia/Kabul").unwrap();
+        assert_eq!((app.state.zone_listed(), app.state.zone_name()), (None, "Asia/Kabul"));
+        assert_eq!(fmt::utc_offset(SUMMER, app.state.zone()), "UTC+04:30");
+        assert!(app.set_system_zone("Mars/Olympus").is_err(), "a name the recovery carries no rules for");
+        assert_eq!(app.state.zone_name(), "Asia/Kabul", "the zone kept stays");
+        app.state.follow_system_zone = false;
+        assert_eq!(app.state.zone_name(), "中国标准时间");
+    }
+
+    #[test]
+    fn a_part_of_the_world_lists_its_zones_by_how_far_they_are_from_utc_now() {
+        let (f, i) = (fonts(), info());
+        for now in [WINTER, SUMMER] {
+            for region in Region::ALL {
+                let mut app = App::new(Screen::TimeZones(region), W, H, PPD);
+                app.set_now(now);
+                let zones: Vec<usize> = app.frame(&f, &i).hits.iter().map(|h| match h.action {
+                    Action::TimeZone(at) => at,
+                    other => panic!("{region:?} lists only zones, not {other:?}"),
+                }).collect();
+                let of_region = TIME_ZONES.iter().filter(|zone| zone.region == Some(region)).count();
+                assert_eq!(zones.len(), of_region, "{region:?} lists each of its zones");
+                let offsets: Vec<i32> = zones.iter().map(|&at| fmt::utc_offset_seconds(now, fmt::rules(at))).collect();
+                assert!(offsets.is_sorted(), "{region:?} at {now}: {offsets:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_time_zone_pages_are_drawn_again_when_a_zone_s_clocks_change() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::TimeZones(Region::EuropeAfrica), W, H, PPD);
+        // 2026-03-29 00:59 UTC, a minute before Europe's clocks go forward.
+        let before = 1_774_745_940;
+        app.set_now(before);
+        app.frame(&f, &i);
+        app.set_now(before + 30);
+        assert!(app.frame.is_some(), "the same minute");
+        app.set_now(before + 60);
+        assert!(app.frame.is_none(), "London is an hour ahead of UTC now");
+        app.frame(&f, &i);
+        app.set_now(before + 120);
+        assert!(app.frame.is_some(), "no zone's clocks changed in this minute");
     }
 
     #[test]
