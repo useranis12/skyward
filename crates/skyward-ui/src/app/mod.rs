@@ -41,6 +41,7 @@ mod draw;
 mod entry;
 mod filesystem;
 mod frame;
+mod image;
 mod input;
 mod install;
 mod keys;
@@ -69,6 +70,7 @@ pub use decrypt::*;
 pub use entry::*;
 pub use filesystem::*;
 pub use frame::*;
+pub use image::*;
 pub use install::*;
 pub use manager::*;
 pub use mount::*;
@@ -138,6 +140,7 @@ pub enum Screen {
     /// another.
     Filesystems,
     Partitions,
+    ImageBackup,
     /// One of them: what it holds, and what to do to it, with a swipe to
     /// do it.
     Filesystem,
@@ -237,6 +240,12 @@ pub enum Confirm {
     RemoveSystem,
     /// Install the system the installer holds with the room chosen.
     InstallSystem,
+    /// Write the partition at this row of the image page out as an image.
+    ExportImage(usize),
+    /// Write the image at this row back over the partition it came from.
+    ImportImage(usize),
+    /// Delete the image at this row.
+    DeleteImage(usize),
 }
 
 /// What a control does when touched.
@@ -412,6 +421,20 @@ pub enum Action {
     UpdateSkyward,
     /// Stop downloading the build.
     StopSkywardUpdate,
+    /// Write the partition at this place in the image page's list out whole
+    /// as an image file.
+    ExportImage(usize),
+    /// Write the image at this place in the image page's list back over the
+    /// partition it came from.
+    ImportImage(usize),
+    /// Delete the image at this place in the image page's list.
+    DeleteImage(usize),
+    /// Show the partitions an image can be taken from, or the images saved.
+    ImageShows(bool),
+    /// Stop work on an image.
+    StopImage,
+    /// Read the partitions an image can be taken from, and the images saved.
+    ReadImages,
     /// A control whose work is not wired up yet; touching it says so.
     Unavailable(&'static str),
 }
@@ -637,6 +660,23 @@ pub enum Effect {
     /// The charge step chosen on the charge page, kept for the next start of
     /// the recovery, which is when the programs that settle it are started.
     ChargeStep(ChargeMode),
+    /// Write `partition` out whole as an image file, telling how it goes with
+    /// [`App::image_at`] and [`App::image_ended`]. `drive` puts it on the USB
+    /// drive rather than internal storage.
+    ExportImage {
+        partition: String,
+        size: u64,
+        drive: bool,
+    },
+    /// Write the image at `path` back over the partition it was taken from,
+    /// checked against `sha256` before the partition is touched.
+    ImportImage {
+        partition: String,
+        path: String,
+        sha256: String,
+    },
+    /// Delete the image file at `path`.
+    DeleteImage(String),
 }
 
 /// How far the lock's knob has to be dragged for the page behind it to show.

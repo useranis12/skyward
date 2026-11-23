@@ -30,6 +30,9 @@ evdev = "0.13.2"
 hex = { workspace = true }
 skyward-backup = { path = "../skyward-backup" }
 skyward-binder = { path = "../skyward-binder" }
+# The digest of an image is taken as it is written, so an image written back
+# can be checked whole before the partition it came from is touched.
+sha2 = "0.10.9"
 skyward-crypto = { path = "../skyward-crypto" }
 skyward-files = { path = "../skyward-files" }
 zip = { version = "8.6.0", default-features = false }

@@ -630,6 +630,29 @@ impl App {
                     return vec![Effect::StopSkywardUpdate];
                 }
             }
+            // A tap on a row of the image page asks with a swipe before
+            // anything is written or deleted: writing a partition out, or over
+            // one, is not something a stray touch should start.
+            Action::ExportImage(k) => self.ask_image(Confirm::ExportImage(k)),
+            Action::ImportImage(k) => self.ask_image(Confirm::ImportImage(k)),
+            Action::DeleteImage(k) => self.ask_image(Confirm::DeleteImage(k)),
+            Action::StopImage => {
+                if let Some(job) = self.state.image_job.as_mut()
+                    && job.outcome.is_none()
+                {
+                    job.stopping = true;
+                    self.refresh();
+                    return vec![Effect::StopImage];
+                }
+            }
+            Action::ImageShows(k) => {
+                self.state.image_showing_parts = k;
+                self.refresh();
+            }
+            Action::ImageTo(drive) => {
+                self.state.image_to_drive = drive;
+                self.refresh();
+            }
             Action::Unavailable(text) => self.say(text, now),
         }
         Vec::new()
@@ -766,10 +789,72 @@ impl App {
         Vec::new()
     }
 
+    /// The row of the image page tapped: its swipe comes up over the page, and
+    /// nothing is written until it is taken across.
+    fn ask_image(&mut self, which: Confirm) {
+        self.state.image_asking = Some(which);
+        self.state.confirm = 0.0;
+        self.drag = Drag::Idle;
+        self.refresh();
+    }
+
+    /// Write the partition at `k` out as an image file, the swipe taken across
+    /// saying so.
+    pub(super) fn export_image(&mut self, k: usize) -> Vec<Effect> {
+        let parts = match &self.state.image_parts {
+            Ok(parts) => parts,
+            Err(_) => return Vec::new(),
+        };
+        let Some(part) = parts.get(k) else { return Vec::new() };
+        let (partition, size) = (part.name.clone(), part.size);
+        self.state.image_job = Some(ImageJob { kind: ImageFlow::Export, partition: partition.clone(), done: 0, of: size, stopping: false, outcome: None });
+        self.refresh();
+        vec![Effect::ExportImage { partition, size, drive: self.state.image_to_drive }]
+    }
+
+    /// Write the image at `k` back over the partition it came from.
+    pub(super) fn import_image(&mut self, k: usize) -> Vec<Effect> {
+        let files = match &self.state.image_files {
+            Ok(files) => files,
+            Err(_) => return Vec::new(),
+        };
+        let Some(file) = files.get(k) else { return Vec::new() };
+        let (partition, path, sha256) = (file.partition.clone(), file.path.clone(), file.sha256.clone());
+        self.state.image_job = Some(ImageJob { kind: ImageFlow::Import, partition: partition.clone(), done: 0, of: file.size, stopping: false, outcome: None });
+        self.refresh();
+        vec![Effect::ImportImage { partition, path, sha256 }]
+    }
+
+    /// Delete the image at `k`.
+    pub(super) fn delete_image(&mut self, k: usize) -> Vec<Effect> {
+        let files = match &self.state.image_files {
+            Ok(files) => files,
+            Err(_) => return Vec::new(),
+        };
+        let Some(file) = files.get(k) else { return Vec::new() };
+        let path = file.path.clone();
+        self.refresh();
+        vec![Effect::DeleteImage(path)]
+    }
+
     /// What a swipe-to-confirm control slid to its end does.
     pub(super) fn confirmed(&mut self, which: Confirm, now: u64) -> Vec<Effect> {
         let (l, mut fx) = (self.state.lang, Vec::new());
         match which {
+            // The image page's own swipes do what their rows used to do at a
+            // tap, now that a tap alone cannot start one by mistake.
+            Confirm::ExportImage(k) => {
+                self.state.image_asking = None;
+                fx.extend(self.export_image(k));
+            }
+            Confirm::ImportImage(k) => {
+                self.state.image_asking = None;
+                fx.extend(self.import_image(k));
+            }
+            Confirm::DeleteImage(k) => {
+                self.state.image_asking = None;
+                fx.extend(self.delete_image(k));
+            }
             Confirm::Reboot => fx.push(Effect::Reboot(TARGETS[self.state.reboot])),
             Confirm::Wipe => {
                 let chosen: Vec<Wipe> = WIPES.iter().zip(self.state.wipe).filter(|(_, on)| *on).map(|(&w, _)| w).collect();

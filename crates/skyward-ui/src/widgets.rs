@@ -1791,6 +1791,15 @@ pub fn slider_card(c: &mut Canvas, t: &Theme, f: &Fonts, top: f32, caption: Capt
     SliderBlock { bottom: top + h, track, below: below_rect }
 }
 
+/// How tall this row is drawn, measured on a canvas wide enough for it.
+///
+/// The pages that hold a screen's worth of rows and turn from one screen to
+/// the next need a row's height before they can say how many fit; this is how
+/// they measure one without drawing a whole list.
+pub fn one_height(c: &Canvas, t: &Theme, f: &Fonts, r: &Row) -> f32 {
+    layout(c, t, f, r).h
+}
+
 /// Swipe-to-confirm control in the thick-slider style; `progress` (0 to 1)
 /// is how far the knob has been dragged. Returns the track.
 pub fn confirm(c: &mut Canvas, t: &Theme, f: &Fonts, top: f32, label: &str, danger: bool, progress: f32) -> Rect {
@@ -1823,6 +1832,8 @@ pub fn confirm_in(c: &mut Canvas, t: &Theme, f: &Fonts, track: Rect, label: &str
     Rect::new(x, top, w, h)
 }
 
+/// Swipe-to-confirm control in the thick-slider style; `progress` (0 to 1)
+/// is how far the knob has been dragged. Returns the track.
 pub fn progress_bar(c: &mut Canvas, t: &Theme, x: f32, y: f32, w: f32, value: f32) {
     let m = &t.m;
     let h = m.dp(6.0);

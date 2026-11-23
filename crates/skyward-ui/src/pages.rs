@@ -90,6 +90,7 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::Relabel => relabel(cx),
         Screen::Filesystems => filesystems(cx),
         Screen::Partitions => partitions(cx),
+        Screen::ImageBackup => image_backup(cx),
         Screen::Filesystem => filesystem(cx),
         Screen::PartWork => part_work(cx),
         Screen::Language => language(cx),
@@ -141,6 +142,9 @@ pub fn confirm_label(which: Confirm, s: &State) -> (&'static str, bool) {
         Confirm::SwitchSystem => (["滑动以切换并重启", "滑動以切換並重新啟動", "Slide to switch and reboot"], false),
         Confirm::RemoveSystem => (["滑动以删除", "滑動以刪除", "Slide to remove"], true),
         Confirm::InstallSystem => (INSTALL, false),
+        Confirm::ExportImage(_) => (["滑动以写入镜像", "滑動以寫入映像檔", "Slide to write the image"], true),
+        Confirm::ImportImage(_) => (["滑动以写回镜像", "滑動以寫回映像檔", "Slide to write it back"], true),
+        Confirm::DeleteImage(_) => (["滑动以删除", "滑動以刪除", "Slide to delete"], true),
     };
     (s.lang.pick(label), danger)
 }
@@ -201,6 +205,20 @@ fn long_page(cx: &Ctx) -> Canvas {
 /// margin after it, and never shorter than one screen.
 fn fitted(t: &Theme, bottom: f32) -> u32 {
     ((bottom + t.m.margin * 2.0).ceil() as u32).max(t.m.h)
+}
+
+/// How many screens a list of `rows` takes, at `top` down the page, with
+/// `room` for whatever stands above and below it, each row `row_h` tall.
+fn screens_for(t: &Theme, top: f32, room: f32, rows: usize, row_h: f32) -> u32 {
+    let h = top + room + row_h * rows as f32;
+    (h / t.m.h as f32).ceil() as u32 + 1
+}/// How tall a long page whose content ends at `bottom` is: to the bottom
+
+/// [`long_page`] for a page that may hold more rows than three screens: the
+/// sheet is `screens` screens tall, and [`fit`] trims it to the content. A
+/// list of every partition on the phone runs past three.
+fn long_page_of(cx: &Ctx, screens: u32) -> Canvas {
+    sheet(cx, cx.t.m.h * screens.max(1), cx.t.pal.bg)
 }
 
 /// Trim a long page to its content plus the bottom margin, and never shorter
@@ -2456,6 +2474,7 @@ pub fn advanced(cx: &Ctx) -> Frame {
         Row::new(l.pick(TERMINAL)).icon(SLATE, Icon::Terminal),
         Row::new(l.pick(RELABEL)).icon(PURPLE, Icon::Shield),
         Row::new(l.pick(PARTITIONS)).icon(RED, Icon::Mount),
+        Row::new(l.pick(IMAGE_BACKUP)).icon(BLUE, Icon::Backup),
         Row::new(l.pick(FILESYSTEMS)).icon(RED, Icon::Mount),
         Row::new(l.pick(LOGS)).icon(ORANGE, Icon::Log),
         Row::new(l.pick(FETCH)).icon(BLUE, Icon::Layers),
@@ -2467,6 +2486,7 @@ pub fn advanced(cx: &Ctx) -> Frame {
         Action::Open(Screen::Terminal),
         Action::Open(Screen::Relabel),
         Action::Open(Screen::Partitions),
+        Action::Open(Screen::ImageBackup),
         Action::Open(Screen::Filesystems),
         Action::Open(Screen::Logs),
         Action::Open(Screen::Fetch),
@@ -2479,6 +2499,7 @@ pub fn advanced(cx: &Ctx) -> Frame {
 const RELABEL: Text = ["修复 SELinux 上下文", "修復 SELinux 上下文", "Fix SELinux contexts"];
 const FILESYSTEMS: Text = ["文件系统", "檔案系統", "Filesystems"];
 const PARTITIONS: Text = ["分区管理", "分割區管理", "Partitions"];
+const IMAGE_BACKUP: Text = ["镜像备份", "映像檔備份", "Image backup"];
 const STOPPED: Text = ["已停止", "已停止", "Stopped"];
 const STOPPING: Text = ["正在停止", "正在停止", "Stopping"];
 
@@ -2618,6 +2639,264 @@ pub fn filesystems(cx: &Ctx) -> Frame {
         }
     };
     Frame::new(t, fit(c, t, bottom), out, l.pick(FILESYSTEMS), top)
+}
+
+/// Partitions written out whole as image files, images written back over the
+/// partitions they came from, and the images kept.
+///
+/// Two lists share the page: the partitions an image can be taken from, and
+/// the images already saved. A pill at the top says which is showing, and
+/// work under way takes the page over, so nothing can be started while one is
+/// still going.
+pub fn image_backup(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    // The list of partitions is as long as the phone has partitions, which can
+    // be more than three screens' worth: the sheet is made to fit them. A row
+    // with a subtitle is taller than a bare one, so the height is measured
+    // from a row of the list rather than assumed.
+    let rows = match (&s.image_parts, s.image_showing_parts) {
+        (Ok(parts), true) => parts.len(),
+        _ => 0,
+    };
+    let row_h = match &s.image_parts {
+        Ok(parts) if !parts.is_empty() => {
+            let probe = Canvas::band(t.m.w, 1, 0..1, 0..t.m.w, t.pal.bg);
+            let size = fmt::bytes(parts[0].size);
+            widgets::one_height(&probe, t, f, &Row::new(&parts[0].name).subtitle(&size))
+        }
+        _ => t.m.row_h,
+    };
+    let screens = screens_for(t, t.m.content_top, row_h * 6.0, rows, row_h);
+    let mut c = long_page_of(cx, screens);
+    let mut out = Vec::new();
+    let top = t.m.content_top;
+    // Work under way, or how it last ended, takes the page over: a second
+    // image started over a partition being written would spoil both.
+    if let Some(job) = s.image_job.as_ref() {
+        return image_job_page(cx, job);
+    }
+    // The two lists, as a pair of rows that say which is showing.
+    let showing = |parts: bool| s.image_showing_parts == parts;
+    let choose = widgets::list(
+        &mut c,
+        t,
+        f,
+        top,
+        &[
+            Row::new(l.pick(["分区", "分割區", "Partitions"])).subtitle(l.pick(["把分区写成镜像文件", "把分割區寫成映像檔", "Write a partition out as an image"])).trail(Trail::Check(showing(true))),
+            Row::new(l.pick(["镜像", "映像檔", "Images"])).subtitle(l.pick(["写回分区，或删除", "寫回分割區，或刪除", "Write one back, or delete it"])).trail(Trail::Check(showing(false))),
+        ],
+    );
+    out.extend(hits(&choose.rows, &[Action::ImageShows(true), Action::ImageShows(false)]));
+    // A section label between the two rows that choose a list and the list
+    // itself: without one the list's first row sits against the row above it
+    // and reads as a third choice rather than the start of another list.
+    let label = match s.image_showing_parts {
+        true => l.pick(["分区", "分割區", "Partitions"]),
+        false => l.pick(["镜像", "映像檔", "Images"]),
+    };
+    let mut y = widgets::section(&mut c, t, f, choose.bottom, label);
+    y = if s.image_showing_parts {
+        image_parts_list(cx, &mut c, &mut out, y)
+    } else {
+        image_files_list(cx, &mut c, &mut out, y)
+    };
+    Frame::new(t, fit(c, t, y), out, l.pick(IMAGE_BACKUP), top)
+}
+
+/// The partitions an image can be taken from, each with its size and a way to
+/// write it out.
+fn image_parts_list(cx: &Ctx, c: &mut Canvas, out: &mut Vec<Hit>, y: f32) -> f32 {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    match &s.image_parts {
+        Err(why) => {
+            let y = widgets::list(c, t, f, y, &[Row::new(l.pick(["无法读取分区", "無法讀取分割區", "Couldn't read the partitions"])).trail(Trail::None)]).bottom;
+            widgets::footnote(c, t, f, y, why)
+        }
+        Ok(parts) if parts.is_empty() => widgets::list(c, t, f, y, &[Row::new(l.pick(["本机没有分区", "本機沒有分割區", "This phone lists no partitions"])).trail(Trail::None)]).bottom,
+        Ok(parts) => {
+            let sizes: Vec<String> = parts.iter().map(|p| fmt::bytes(p.size)).collect();
+            let shown: Vec<Row> = parts.iter().zip(&sizes).map(|(p, size)| Row::new(&p.name).subtitle(size).trail(Trail::Arrow)).collect();
+            let list = widgets::list(c, t, f, y, &shown);
+            out.extend(hits(&list.rows, &(0..parts.len()).map(Action::ExportImage).collect::<Vec<_>>()));
+            let mut bottom = list.bottom;
+            // A tap picks the partition; the swipe that writes it out stands
+            // under the list, so a stray touch starts nothing.
+            if let Some(Confirm::ExportImage(k)) = s.image_asking {
+                let ask = match parts.get(k) {
+                    Some(part) => format!("把 {} 分区写成镜像文件？分区有多大，镜像就有多大。", part.name),
+                    None => String::new(),
+                };
+                let y = widgets::footnote(c, t, f, bottom, &ask);
+                let (label, danger) = confirm_label(Confirm::ExportImage(k), s);
+                let track = widgets::confirm(c, t, f, y + t.m.dp(24.0), label, danger, s.confirm);
+                out.push(Hit { rect: track, action: Action::Confirm(Confirm::ExportImage(k)) });
+                bottom = track.y + track.h;
+            } else {
+                let note = l.pick([
+                    "选一个分区，把它的全部内容写成一个镜像文件。分区有多大，镜像就有多大。",
+                    "選一個分割區，把它的全部內容寫成一個映像檔。分割區有多大，映像檔就有多大。",
+                    "Pick a partition to write all of it out as one image file. The image is as large as the partition.",
+                ]);
+                bottom = widgets::footnote(c, t, f, bottom, note);
+            }
+            bottom
+        }
+    }
+}
+
+/// The images already saved, each with the partition it came from, how large
+/// it is, and a way to write it back or delete it.
+fn image_files_list(cx: &Ctx, c: &mut Canvas, out: &mut Vec<Hit>, y: f32) -> f32 {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    match &s.image_files {
+        Err(why) => {
+            let y = widgets::list(c, t, f, y, &[Row::new(l.pick(["无法读取镜像", "無法讀取映像檔", "Couldn't read the images"])).trail(Trail::None)]).bottom;
+            widgets::footnote(c, t, f, y, why)
+        }
+        Ok(files) if files.is_empty() => widgets::list(c, t, f, y, &[Row::new(l.pick(["还没有保存的镜像", "還沒有儲存的映像檔", "No images saved yet"])).trail(Trail::None)]).bottom,
+        Ok(files) => {
+            let subs: Vec<String> = files
+                .iter()
+                .map(|file| format!("{} · {} · {}", file.partition, fmt::bytes(file.size), fmt::date(l, file.made, s.time_zone)))
+                .collect();
+            let shown: Vec<Row> = files.iter().zip(&subs).map(|(file, sub)| Row::new(&file.name).subtitle(sub).trail(Trail::Arrow)).collect();
+            let list = widgets::list(c, t, f, y, &shown);
+            out.extend(hits(&list.rows, &(0..files.len()).map(Action::ImportImage).collect::<Vec<_>>()));
+            // Each image's own row opens it; the rows under the list are where
+            // one is deleted, since deleting asks nothing of the partition.
+            let mut below = list.bottom;
+            let deletes_word = l.pick(["删除", "刪除", "Delete"]);
+            let names: Vec<String> = files.iter().map(|file| format!("{deletes_word} {}", file.name)).collect();
+            let actions: Vec<Row> = names.iter().map(|name| Row::new(name).tint(t.pal.danger)).collect();
+            if !actions.is_empty() {
+                let y = widgets::section(c, t, f, below, l.pick(ACTIONS));
+                let deletes = widgets::list(c, t, f, y, &actions);
+                out.extend(hits(&deletes.rows, &(0..files.len()).map(Action::DeleteImage).collect::<Vec<_>>()));
+                below = deletes.bottom;
+            }
+            // Writing an image back replaces a whole partition, and deleting
+            // one takes it away: both are asked with a swipe under the list.
+            match s.image_asking {
+                Some(Confirm::ImportImage(k)) => {
+                    let ask = match files.get(k) {
+                        Some(file) => format!("把镜像写回 {}？该分区上的内容会被全部替换。", file.partition),
+                        None => String::new(),
+                    };
+                    let y = widgets::footnote(c, t, f, below, &ask);
+                    let (label, danger) = confirm_label(Confirm::ImportImage(k), s);
+                    let track = widgets::confirm(c, t, f, y + t.m.dp(24.0), label, danger, s.confirm);
+                    out.push(Hit { rect: track, action: Action::Confirm(Confirm::ImportImage(k)) });
+                    below = track.y + track.h;
+                }
+                Some(Confirm::DeleteImage(k)) => {
+                    let ask = match files.get(k) {
+                        Some(file) => format!("删除镜像「{}」？删除后无法恢复。", file.name),
+                        None => String::new(),
+                    };
+                    let y = widgets::footnote(c, t, f, below, &ask);
+                    let (label, danger) = confirm_label(Confirm::DeleteImage(k), s);
+                    let track = widgets::confirm(c, t, f, y + t.m.dp(24.0), label, danger, s.confirm);
+                    out.push(Hit { rect: track, action: Action::Confirm(Confirm::DeleteImage(k)) });
+                    below = track.y + track.h;
+                }
+                _ => {
+                    let note = l.pick([
+                        "写回前会先核对整份镜像，与保存时不一致就一个字节也不写。",
+                        "寫回前會先核對整份映像檔，與儲存時不一致就一個位元組也不寫。",
+                        "An image is checked whole before it is written back; if it does not match what was saved, not a byte is written.",
+                    ]);
+                    below = widgets::footnote(c, t, f, below, note);
+                }
+            }
+            below
+        }
+    }
+}
+
+/// Work on an image under way, or how it ended: the partition, how far it has
+/// come, and a way to stop it while it runs.
+fn image_job_page(cx: &Ctx, job: &ImageJob) -> Frame {
+    let (t, f, l) = (cx.t, cx.f, cx.state.lang);
+    let mut c = long_page(cx);
+    let mut out = Vec::new();
+    let top = t.m.content_top;
+    let exporting = job.kind == ImageFlow::Export;
+    let title = match exporting {
+        true => ["正在写入镜像", "正在寫入映像檔", "Writing the image"],
+        false => ["正在写回镜像", "正在寫回映像檔", "Writing the image back"],
+    };
+    let done = job.done.min(job.of);
+    // While it runs, the detail says what it is doing; once it has ended, how
+    // much of the partition went through.
+    let doing = match (exporting, job.outcome.is_some()) {
+        (true, false) => l.pick(["正在读取分区", "正在讀取分割區", "Reading the partition"]),
+        (false, false) => l.pick(["正在核对镜像", "正在核對映像檔", "Checking the image"]),
+        _ => l.pick(["镜像", "映像檔", "Image"]),
+    };
+    let detail = format!("{doing} · {} · {} / {}", job.partition, fmt::bytes(done), fmt::bytes(job.of));
+    let share = match job.of {
+        0 => 0.0,
+        of => done as f32 / of as f32,
+    };
+    let y = widgets::progress_card(&mut c, t, f, top, l.pick(title), &detail, Some(share));
+    match &job.outcome {
+        None => {
+            let y = widgets::section(&mut c, t, f, y, l.pick(ACTIONS));
+            let stop = if job.stopping { l.pick(["正在停止…", "正在停止…", "Stopping…"]) } else { l.pick(["停止", "停止", "Stop"]) };
+            let list = widgets::list(&mut c, t, f, y, &[Row::new(stop).tint(t.pal.danger)]);
+            if !job.stopping {
+                out.extend(hits(&list.rows, &[Action::StopImage]));
+            }
+            let note = if exporting {
+                l.pick(["写入完成前，请不要关机。", "寫入完成前，請不要關機。", "Don't power off until it's written."])
+            } else {
+                l.pick(["写回完成前，请不要关机，也不要断开数据线。", "寫回完成前，請不要關機，也不要拔除傳輸線。", "Don't power off or unplug the cable until it's written back."])
+            };
+            widgets::footnote(&mut c, t, f, list.bottom, note)
+        }
+        Some(end) => {
+            let (said, ink, icon) = match end {
+                ImageEnd::Exported(path) => (format!("{} {path}", l.pick(["镜像已保存到", "映像檔已儲存到", "Saved the image to"])), GREEN, Icon::Install),
+                ImageEnd::Imported(part) => (format!("{} {part}", l.pick(["已将镜像写回", "已將映像檔寫回", "Wrote the image back over"])), GREEN, Icon::Install),
+                ImageEnd::Deleted(path) => (format!("{} {path}", l.pick(["已删除", "已刪除", "Deleted"])), SLATE, Icon::Wipe),
+                ImageEnd::Stopped => (l.pick(["已停止", "已停止", "Stopped"]).to_string(), SLATE, Icon::Wipe),
+                ImageEnd::Mismatched { wanted, found } => (
+                    format!(
+                        "{} {wanted} {} {found}",
+                        l.pick([
+                            "镜像与保存时不一致，未写入任何内容。保存时为",
+                            "映像檔與儲存時不一致，未寫入任何內容。儲存時為",
+                            "The image does not match what was saved, so nothing was written. It was",
+                        ]),
+                        l.pick(["，现在读到", "，現在讀到", ", and reads"]),
+                    ),
+                    RED,
+                    Icon::Shield,
+                ),
+                ImageEnd::Failed(why) => (format!("{} {why}", l.pick(["失败：", "失敗：", "Failed: "])), RED, Icon::Wipe),
+            };
+            let failed = matches!(end, ImageEnd::Mismatched { .. } | ImageEnd::Failed(_));
+            let heading = if failed {
+                l.pick(["未完成", "未完成", "Not done"])
+            } else if matches!(end, ImageEnd::Stopped) {
+                l.pick(["已停止", "已停止", "Stopped"])
+            } else {
+                l.pick(["完成", "完成", "Done"])
+            };
+            // How it went stands apart from the progress above it, and what to
+            // do next is a row of its own: the card saying how it went is not
+            // itself a button, and the page is left with `<`.
+            let y = widgets::section(&mut c, t, f, y, l.pick(["结果", "結果", "Result"]));
+            let said_row = widgets::list(&mut c, t, f, y, &[standing(heading, ink, icon, &said)]);
+            let y = widgets::section(&mut c, t, f, said_row.bottom, l.pick(ACTIONS));
+            let back = l.pick(["返回", "返回", "Back"]);
+            let list = widgets::list(&mut c, t, f, y, &[Row::new(back)]);
+            out.extend(hits(&list.rows, &[Action::Back]));
+            list.bottom
+        }
+    };
+    Frame::new(t, fit(c, t, y), out, l.pick(IMAGE_BACKUP), top)
 }
 
 /// What a partition holds, as its row and page name it: the data

@@ -260,6 +260,22 @@ pub struct State {
     pub fs_action: FsAction,
     /// Work on whole partitions under way, or how it last ended.
     pub part_work: Option<PartWork>,
+    /// The partitions an image can be taken from, and the images already
+    /// saved, as the runtime last read them, or why it could not; none until
+    /// it has.
+    pub image_parts: Result<Vec<ImagePart>, String>,
+    pub image_files: Result<Vec<ImageFile>, String>,
+    /// Whether the image page lists the partitions to take an image from, or
+    /// the images already saved.
+    pub image_showing_parts: bool,
+    /// Whether an image being taken goes to a USB drive rather than internal
+    /// storage.
+    pub image_to_drive: bool,
+    /// Work on an image under way, or how it last ended.
+    pub image_job: Option<ImageJob>,
+    /// The row of the image page whose swipe is showing: a partition to write
+    /// out, or an image to write back or delete, chosen by tapping its row.
+    pub image_asking: Option<Confirm>,
     /// Where an update the system installed stands, as the runtime last
     /// read it.
     pub update: Standing,
@@ -398,6 +414,12 @@ impl Default for State {
             fs_chosen: 0,
             fs_action: FsAction::Repair,
             part_work: None,
+            image_parts: Err("the partitions have not been read yet".into()),
+            image_files: Err("the images have not been read yet".into()),
+            image_showing_parts: true,
+            image_to_drive: false,
+            image_job: None,
+            image_asking: None,
             update: Standing::None,
             wlan: None,
             wlan_auto: false,

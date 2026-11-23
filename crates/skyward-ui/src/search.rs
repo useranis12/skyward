@@ -59,6 +59,14 @@ pub const ENTRIES: &[Entry] = &[
         &["fenquguanli", "fqgl", "fenqu", "fq", "biao", "partition", "partitions", "size", "daxiao"],
     ),
     entry(
+        ["镜像备份", "映像檔備份", "Partition images"],
+        ADVANCED,
+        Screen::ImageBackup,
+        // No key holds "bf" or "beifen": those are the backup page's, and a
+        // query that finds two pages for one word finds neither well.
+        &["jingxiang", "jx", "image", "img", "export", "daochu", "fenqujingxiang"],
+    ),
+    entry(
         ["文件系统", "檔案系統", "Filesystems"],
         ADVANCED,
         Screen::Filesystems,

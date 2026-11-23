@@ -289,6 +289,7 @@ impl App {
             Screen::Charge => vec![Effect::ChargeWatch],
             Screen::Mount => vec![Effect::ReadMounts],
             Screen::Filesystems | Screen::Partitions => vec![Effect::ReadFilesystems],
+            Screen::ImageBackup => vec![Effect::ReadImages],
             Screen::Slot | Screen::Reboot => vec![Effect::ReadSlots],
             Screen::Systems => vec![Effect::ReadSystems],
             Screen::Restore => vec![self.find_backups()],
