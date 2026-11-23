@@ -3364,6 +3364,11 @@ fn rows_that_fit(t: &Theme, f: &Fonts, top: f32, sample: &Row) -> usize {
     ((room / h).floor() as usize).max(1)
 }
 
+/// The way on and back through a list too long for one screen, and where it
+/// stands. `turn` is given the page to go to, rather than how far to move: a
+/// page put the one tapped after a turn under the finger that had just turned
+/// the page, and the page would run back and forth.
+#[allow(clippy::too_many_arguments)]
 fn pager(t: &Theme, f: &Fonts, c: &mut Canvas, out: &mut Vec<Hit>, l: Lang, y: f32, page: usize, pages: usize, turn: fn(usize) -> Action) {
     let ph = t.m.dp(widgets::PILL_DP);
     if pages <= 1 {
