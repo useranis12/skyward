@@ -899,11 +899,6 @@ fn show_closed(app: &mut App, closed: &[Closed]) -> Result<()> {
         (c.user, keys)
     });
     app.data_waiting(waiting);
-    // The picture and the name are kept on the partition just opened, so they
-    // are read here, once, and the home page shows them from then on.
-    if closed.is_empty() {
-        read_account(app);
-    }
     Ok(())
 }
 
@@ -2131,6 +2126,14 @@ impl Pages<'_> {
                     }
                     self.closed = opening.closed;
                     show_closed(&mut self.app, &self.closed)?;
+                    // The picture and the name are kept on the partition just
+                    // opened, so they are read once, as soon as nothing of the
+                    // user's is left closed: the home page shows them from then
+                    // on, and the row it showed before until then.
+                    if !self.account_read && self.closed.is_empty() && matches!(self.app.state.data, Data::Open) {
+                        self.account_read = true;
+                        read_account(&mut self.app);
+                    }
                 }
                 wipe::Event::Ended(outcome) => {
                     let said = outcome.as_ref().map_or_else(wipe::said, |_| "done".to_string());
@@ -2663,6 +2666,14 @@ impl Pages<'_> {
                 }
                 self.closed = opening.closed;
                 show_closed(&mut self.app, &self.closed)?;
+                // The picture and the name are kept on the partition just
+                // opened, so they are read once, as soon as nothing of the
+                // user's is left closed: the home page shows them from then on,
+                // and the row it showed before until then.
+                if !self.account_read && self.closed.is_empty() && matches!(self.app.state.data, Data::Open) {
+                    self.account_read = true;
+                    read_account(&mut self.app);
+                }
             }
             decrypt::Ended::Opened(Err(why)) => {
                 skyward_sys::kmsg(&format!("the data partition stays closed: {why}"))?;
@@ -2678,6 +2689,14 @@ impl Pages<'_> {
             decrypt::Ended::Unlocked(Ok(still)) => {
                 self.closed = still;
                 show_closed(&mut self.app, &self.closed)?;
+                // The picture and the name are kept on the partition just
+                // opened, so they are read once, as soon as nothing of the
+                // user's is left closed: the home page shows them from then on,
+                // and the row it showed before until then.
+                if !self.account_read && self.closed.is_empty() && matches!(self.app.state.data, Data::Open) {
+                    self.account_read = true;
+                    read_account(&mut self.app);
+                }
             }
             decrypt::Ended::Unlocked(Err(why)) => {
                 skyward_sys::kmsg(&format!("what was entered did not open the user's files: {why}"))?;
