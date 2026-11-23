@@ -20,6 +20,9 @@ impl App {
                         Slider::Vibration => {
                             ["按音量键调节振动强度，按电源键完成", "按音量鍵調整震動強度，按電源鍵完成", "Set the vibration with the volume keys, then press the power key"]
                         }
+                        Slider::ThermalLimit => {
+                            ["按音量键调节温度上限，按电源键完成", "按音量鍵調整溫度上限，按電源鍵完成", "Set the temperature limit with the volume keys, then press the power key"]
+                        }
                     };
                     self.say(l.pick(said), now);
                 }

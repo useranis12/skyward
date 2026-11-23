@@ -288,21 +288,26 @@ pub fn home(cx: &Ctx) -> Frame {
         out.extend(hits(&first.rows, &opens));
         y = first.bottom + t.m.card_gap;
     }
+    // Charging sits above the advanced tools: it is used more often than
+    // what is inside them, and should not be hidden there. While a charger is
+    // attached the row shows the power it delivers, which is the same figure
+    // the charge page shows.
+    let charging = match &cx.info.battery {
+        Some(b) if b.plugged => {
+            let value = cx.state.charge.now.map_or_else(|| l.pick(["充电中", "充電中", "Charging"]).to_owned(), fmt::watts);
+            Some(value)
+        }
+        _ => None,
+    };
     let tools = widgets::list(&mut c, t, f, y, &[
         Row::new(l.pick(["安装", "安裝", "Install"])).icon(GREEN, Icon::Install),
         Row::new(l.pick(["备份", "備份", "Backup"])).icon(BLUE, Icon::Backup),
         Row::new(l.pick(["恢复", "還原", "Restore"])).icon(PURPLE, Icon::Restore),
         Row::new(l.pick(["挂载", "掛載", "Mount"])).icon(SLATE, Icon::Mount),
         Row::new(l.pick(DECRYPT)).icon(BLUE, Icon::Lock).trail(Trail::Value(fmt::data(l, &cx.state.data))),
-        // Charging sits above the advanced tools: it is used more often than
-        // what is inside them, and should not be hidden there. While a
-        // charger is attached the row shows the power it delivers, which is
-        // the same figure the charge page shows.
-        match &cx.info.battery {
-            Some(b) if b.plugged => Row::new(l.pick(CHARGE))
-                .icon(GREEN, Icon::Battery)
-                .trail(Trail::Value(cx.state.charge.now.map_or_else(|| l.pick(["充电中", "充電中", "Charging"]).to_owned(), fmt::watts))),
-            _ => Row::new(l.pick(CHARGE)).icon(SLATE, Icon::Battery),
+        match &charging {
+            Some(value) => Row::new(l.pick(CHARGE)).icon(GREEN, Icon::Battery).trail(Trail::Value(value)),
+            None => Row::new(l.pick(CHARGE)).icon(SLATE, Icon::Battery),
         },
     ]);
     out.extend(hits(&tools.rows, &[
