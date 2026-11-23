@@ -655,14 +655,6 @@ impl App {
             }
             // A zip on the file page becomes a module: it must carry a
             // module.prop for the phone to know what it is.
-            Action::Confirm(Confirm::DeleteApp) => {
-                if let Some(at) = self.state.app_at
-                    && let Some(Ok(list)) = &self.state.apps
-                    && let Some(a) = list.get(at)
-                {
-                    return vec![Effect::DataAppRemove(a.package.clone(), a.dir.clone())];
-                }
-            }
             Action::DataAppOpen(k) => {
                 self.state.app_at = Some(k);
                 self.open(Screen::DataAppInfo);
@@ -1109,6 +1101,14 @@ impl App {
                     fx.push(Effect::InstallSystem { size: choice.sizes[choice.size] });
                     self.state.install = Install::Systeming { name: choice.name.clone(), stage: None };
                     self.refresh();
+                }
+            }
+            Confirm::DeleteApp => {
+                if let Some(at) = self.state.app_at
+                    && let Some(Ok(list)) = &self.state.apps
+                    && let Some(a) = list.get(at)
+                {
+                    fx.push(Effect::DataAppRemove(a.package.clone(), a.dir.clone()));
                 }
             }
         }
