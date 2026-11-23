@@ -37,7 +37,7 @@ mod act;
 mod avb;
 mod backup;
 mod charging;
-mod dataapp;
+pub mod dataapp;
 mod dataapp_list;
 mod decrypt;
 mod draw;
