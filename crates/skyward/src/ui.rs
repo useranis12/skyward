@@ -2946,6 +2946,24 @@ impl Pages<'_> {
             // The partitions an image can come from and the images kept are
             // both read here: the page shows them together, and one that
             // failed says so on its own list.
+            Effect::ReadModules => {
+                let rows = read_modules();
+                self.app.set_modules(rows);
+            }
+            Effect::ModuleSwitch(id, on) => {
+                if let Err(e) = switch_module(&id, on) {
+                    skyward_sys::kmsg(&format!("module {id} is not switched: {e}"))?;
+                }
+                let rows = read_modules();
+                self.app.set_modules(rows);
+            }
+            Effect::ModuleRemove(id, on) => {
+                if let Err(e) = mark_module_remove(&id, on) {
+                    skyward_sys::kmsg(&format!("module {id} is not marked: {e}"))?;
+                }
+                let rows = read_modules();
+                self.app.set_modules(rows);
+            }
             Effect::ReadAvb => self.app.set_avb(avb::read().map_err(|e| format!("{e:#}"))),
             Effect::ToggleAvb(check) => {
                 let on = match check {
@@ -3485,4 +3503,142 @@ impl Pages<'_> {
         }
         Ok(())
     }
+}
+
+/// The modules the phone's own system loads: KernelSU and Magisk keep them the
+/// same way — a folder each under `/data/adb/modules` with a `module.prop`
+/// inside, a `disable` file when it is switched off and a `remove` file when it
+/// is to go at the next start.
+fn read_modules() -> Result<Vec<skyward_ui::app::ModuleRow>, String> {
+    use std::path::Path;
+    const DIR: &str = "/data/adb/modules";
+    let list = match std::fs::read_dir(DIR) {
+        Ok(list) => list,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("{DIR} is not read: {e}")),
+    };
+    let mut out = Vec::new();
+    for entry in list.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let id = entry.file_name().to_string_lossy().into_owned();
+        let prop = std::fs::read_to_string(Path::new(&path).join("module.prop")).unwrap_or_default();
+        if prop.trim().is_empty() {
+            continue;
+        }
+        let field = |name: &str| {
+            let key = format!("{name}=");
+            prop.lines().find_map(|line| line.trim().strip_prefix(&key).map(|v| v.trim().to_string())).unwrap_or_default()
+        };
+        let (name, version, author) = (field("name"), field("version"), field("author"));
+        let note = match (version.is_empty(), author.is_empty()) {
+            (true, true) => String::new(),
+            (false, true) => version,
+            (true, false) => author,
+            (false, false) => format!("{version} · {author}"),
+        };
+        out.push(skyward_ui::app::ModuleRow {
+            id: id.clone(),
+            name: if name.is_empty() { id } else { name },
+            note,
+            about: field("description"),
+            enabled: !path.join("disable").exists(),
+            removing: path.join("remove").exists(),
+        });
+    }
+    out.sort_by_key(|m| m.name.to_lowercase());
+    Ok(out)
+}
+
+/// Mark the module in `id` to be removed at the next start, or take the mark
+/// off: KernelSU and Magisk both read a `remove` file inside the module's
+/// folder.
+fn switch_module(id: &str, on: bool) -> std::io::Result<()> {
+    let flag = std::path::Path::new("/data/adb/modules").join(id).join("disable");
+    match on {
+        true => match std::fs::remove_file(&flag) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        },
+        false => std::fs::write(&flag, b""),
+    }
+}
+
+fn mark_module_remove(id: &str, on: bool) -> std::io::Result<()> {
+    let flag = std::path::Path::new("/data/adb/modules").join(id).join("remove");
+    match on {
+        true => std::fs::write(&flag, b""),
+        false => match std::fs::remove_file(&flag) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        },
+    }
+}
+
+/// Install a module from the zip at `path`: its `module.prop` names it, and
+/// everything beside that file goes into `/data/adb/modules/<id>`, replacing a
+/// copy already there.
+fn install_module(path: &str) -> Result<String, String> {
+    use std::io::Read;
+    use std::os::unix::fs::PermissionsExt;
+    let file = std::fs::File::open(path).map_err(|e| format!("{path}: {e}"))?;
+    let mut zip = zip::ZipArchive::new(file).map_err(|e| format!("{path} is not a zip: {e}"))?;
+    // The folder the module sits in inside the zip: the shortest path to a
+    // module.prop. Modules are packed both at the root and inside one folder.
+    let mut prefix: Option<String> = None;
+    for i in 0..zip.len() {
+        let name = zip.by_index(i).map_err(|e| format!("{path}: {e}"))?.name().to_string();
+        if let Some(here) = name.strip_suffix("module.prop") {
+            let here = here.to_string();
+            if prefix.as_ref().is_none_or(|p| here.len() < p.len()) {
+                prefix = Some(here);
+            }
+        }
+    }
+    let prefix = prefix.ok_or_else(|| format!("{path} carries no module.prop"))?;
+    let prop = {
+        let mut entry = zip.by_name(&format!("{prefix}module.prop")).map_err(|e| format!("{path}: {e}"))?;
+        let mut text = String::new();
+        entry.read_to_string(&mut text).map_err(|e| format!("{path}: {e}"))?;
+        text
+    };
+    let field = |key: &str| {
+        let want = format!("{key}=");
+        prop.lines().find_map(|line| line.trim().strip_prefix(&want).map(|v| v.trim().to_string())).unwrap_or_default()
+    };
+    let mut id = field("id");
+    if id.is_empty() {
+        id = field("name").to_lowercase().replace(' ', "_");
+    }
+    if id.is_empty() || id.contains('/') || id.contains("..") {
+        return Err("the module names no folder to sit in".into());
+    }
+    let dest = std::path::Path::new("/data/adb/modules").join(&id);
+    if dest.exists() {
+        std::fs::remove_dir_all(&dest).map_err(|e| format!("clear {}: {e}", dest.display()))?;
+    }
+    std::fs::create_dir_all(&dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+    for i in 0..zip.len() {
+        let mut entry = zip.by_index(i).map_err(|e| format!("{path}: {e}"))?;
+        let name = entry.name().to_string();
+        let Some(rest) = name.strip_prefix(prefix.as_str()) else { continue };
+        if rest.is_empty() || name.ends_with('/') {
+            continue;
+        }
+        let at = dest.join(rest);
+        if let Some(parent) = at.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let mut data = Vec::new();
+        entry.read_to_end(&mut data).map_err(|e| format!("{path}: {e}"))?;
+        std::fs::write(&at, &data).map_err(|e| format!("write {}: {e}", at.display()))?;
+        // 脚本要能执行，其余按普通文件。
+        let mode = if rest.ends_with(".sh") { 0o755 } else { 0o644 };
+        let _ = std::fs::set_permissions(&at, std::fs::Permissions::from_mode(mode));
+    }
+    Ok(id)
 }

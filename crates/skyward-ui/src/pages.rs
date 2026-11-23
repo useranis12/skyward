@@ -94,6 +94,8 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::Tasks => tasks(cx),
         Screen::PowerOff => power_off(cx),
         Screen::Avb => avb(cx),
+        Screen::Modules => modules(cx),
+        Screen::ModuleInfo => module_info(cx),
         Screen::Filesystem => filesystem(cx),
         Screen::PartWork => part_work(cx),
         Screen::Language => language(cx),
@@ -2513,6 +2515,7 @@ const IMAGE_BACKUP: Text = ["镜像备份", "映像檔備份", "Image backup"];
 const TASKS: Text = ["任务", "任務", "Tasks"];
 const POWER_OFF: Text = ["关机", "關機", "Power off"];
 const AVB: Text = ["AVB 校验", "AVB 驗證", "AVB verification"];
+const MODULES: Text = ["模块", "模組", "Modules"];
 const STOPPED: Text = ["已停止", "已停止", "Stopped"];
 const STOPPING: Text = ["正在停止", "正在停止", "Stopping"];
 
@@ -3234,6 +3237,111 @@ fn avb_warning(c: &mut Canvas, cx: &Ctx, y: f32) -> f32 {
     ];
     let heading = l.pick(["关闭之前", "關閉之前", "Before turning it off"]);
     widgets::notes(c, t, f, y + t.m.card_gap, heading, &points)
+}
+
+/// The modules the phone's own system loads — KernelSU's and Magisk's keep them
+/// the same way — each with the switch that turns it on or off.
+pub fn modules(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let mut c = long_page(cx);
+    let top = t.m.content_top;
+    let mut rows: Vec<Row> = Vec::new();
+    let mut acts: Vec<Action> = Vec::new();
+    match &s.modules {
+        None => rows.push(Row::new(l.pick(["正在读取…", "正在讀取…", "Reading…"]))),
+        Some(Err(why)) => {
+            let mut row = Row::new(l.pick(["读取失败", "讀取失敗", "Not read"]));
+            row.sub = Some(why.as_str());
+            rows.push(row);
+        }
+        Some(Ok(list)) if list.is_empty() => rows.push(Row::new(l.pick(["没有安装模块", "沒有安裝模組", "No modules installed"]))),
+        Some(Ok(list)) => {
+            for (k, m) in list.iter().enumerate() {
+                let mut row = Row::new(&m.name).icon(if m.enabled { BLUE } else { SLATE }, Icon::Layers).trail(Trail::Switch(m.enabled));
+                // 副标题：版本与作者；关了的、标了待删除的也说清楚。
+                let off = l.pick(["已关闭", "已關閉", "Off"]);
+                let removing = l.pick(["下次启动时移除", "下次啟動時移除", "removed next start"]);
+                row.sub = Some(match (m.enabled, m.removing, m.note.is_empty()) {
+                    (false, true, _) => removing,
+                    (false, false, _) => off,
+                    (true, true, _) => removing,
+                    (true, false, true) => m.about.as_str(),
+                    (true, false, false) => m.note.as_str(),
+                });
+                rows.push(row);
+                acts.push(Action::ModuleOpen(k));
+            }
+        }
+    }
+    // 角落里那颗「仓库」：去取模块清单。放在返回箭头右边，免得压住它。
+    let mut out = Vec::new();
+    let pill_h = t.m.dp(widgets::PILL_DP);
+    let pill_x = t.m.back_x + t.m.back_w + t.m.dp(14.0);
+    let pill_y = t.m.back_cy - pill_h / 2.0;
+    // 一枚「安装」：去文件管理器挑 zip。
+    let install = l.pick(["安装", "安裝", "Install"]);
+    let wid = widgets::pill(&mut c, t, f, pill_x, pill_y, install, t.pal.search, t.pal.text);
+    out.push(Hit { rect: Rect::new(pill_x, pill_y, wid, pill_h), action: Action::Open(Screen::Files) });
+    // 一枚「搜索模块」：只看这个列表，不搜功能。放在「安装」右边，靠右对齐。
+    let search_label = l.pick(["搜索模块", "搜尋模組", "Search modules"]);
+    let w = widgets::pill_width(&c, t, f, search_label);
+    let x = t.m.w as f32 - t.m.margin - w;
+    let wd = widgets::pill(&mut c, t, f, x, pill_y, search_label, t.pal.search, t.pal.text);
+    out.push(pill_hit(t, x, pill_y, wd, pill_h, Action::SearchModules));
+    let listed = widgets::list(&mut c, t, f, top, &rows);
+    let rows_hits = hits(&listed.rows, &acts);
+    out.extend(rows_hits);
+    // 装得再多也能滚到，页脚不贴着最后一行。
+    let bottom = widgets::footnote(&mut c, t, f, listed.bottom, l.pick(["点一个模块看它是什么，或者把它关掉", "點一個模組看它是什麼，或者把它關掉", "Open a module to see what it is, or turn it off here"]));
+    Frame::new(t, fit(c, t, bottom), out, l.pick(MODULES), top)
+}
+
+/// One module: what it says of itself, and the two things that can be done
+/// with it — switched off or on, and taken away at the next start.
+pub fn module_info(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let mut c = long_page(cx);
+    let top = t.m.content_top;
+    let at = s.module_at.unwrap_or(0);
+    let picked = match &s.modules {
+        Some(Ok(list)) => list.get(at),
+        _ => None,
+    };
+    let Some(m) = picked else {
+        return Frame::new(t, c, Vec::new(), l.pick(MODULES), top);
+    };
+    let state_note = match (m.enabled, m.removing) {
+        (true, true) => l.pick(["已开启 · 下次启动时移除", "已開啟 · 下次啟動時移除", "On · removed next start"]),
+        (true, false) => l.pick(["已开启", "已開啟", "On"]),
+        (false, _) => l.pick(["已关闭", "已關閉", "Off"]),
+    };
+    let mut facts: Vec<(&str, String)> = vec![(l.pick(["版本", "版本", "Version"]), m.note.clone())];
+    if !m.about.is_empty() {
+        facts.push((l.pick(["说明", "說明", "About"]), m.about.clone()));
+    }
+    facts.push((l.pick(["状态", "狀態", "State"]), state_note.to_string()));
+    facts.push((l.pick(["位置", "位置", "Where"]), format!("/data/adb/modules/{}", m.id)));
+    let y = widgets::info_card(&mut c, t, f, top, &facts);
+    // 开关一张卡片，卸载另一张：卸载要重启才生效，也不该和开关并排放着。
+    let switch_label = if m.enabled { l.pick(["关闭模块", "關閉模組", "Turn it off"]) } else { l.pick(["开启模块", "開啟模組", "Turn it on"]) };
+    let turned = widgets::list(&mut c, t, f, y + t.m.card_gap, &[Row::new(switch_label).icon(BLUE, Icon::Layers)]);
+    let remove_label = if m.removing { l.pick(["取消卸载", "取消卸載", "Keep it"]) } else { l.pick(["卸载模块", "卸載模組", "Uninstall"]) };
+    let removed = widgets::list(&mut c, t, f, turned.bottom + t.m.card_gap, &[Row::new(remove_label).icon(RED, Icon::Wipe).tint(t.pal.danger)]);
+    let mut out = hits(&turned.rows, &[Action::ModuleToggle(at)]);
+    out.extend(hits(&removed.rows, &[Action::ModuleRemove(at)]));
+    let note = match m.removing {
+        true => l.pick(["这个模块会在下次启动时被移除。再点一次就留下它。", "這個模組會在下次啟動時被移除。再點一次就留下它。", "This module is taken away at the next start. Choose it again to keep it."]),
+        false => l.pick(["卸载要重启后才生效，重启前可以取消。", "卸載要重啟後才生效，重啟前可以取消。", "Uninstalling takes effect at the next start, and can be undone until then."]),
+    };
+    let bottom = widgets::footnote(&mut c, t, f, removed.bottom, note);
+    Frame::new(t, fit(c, t, bottom), out, l.pick(MODULES), top)
+}
+
+/// A pill's tap target: the pill and a little about it, so that a finger that
+/// lands beside it still finds it.
+fn pill_hit(t: &Theme, x: f32, y: f32, w: f32, h: f32, action: Action) -> Hit {
+    let pad = (t.m.dp(44.0) - h).max(0.0) / 2.0;
+    Hit { rect: Rect::new(x - t.m.dp(4.0), y - pad, w + t.m.dp(8.0), h + pad * 2.0), action }
 }
 
 /// What a partition holds, as its row and page name it: the data

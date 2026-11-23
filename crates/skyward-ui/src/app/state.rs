@@ -88,6 +88,21 @@ impl ChargeMode {
 /// Choices the pages show and the user changes, and where installing
 /// stands.
 #[derive(Clone, Debug, PartialEq)]
+/// One module the phone's own system loads, as the modules page lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModuleRow {
+    /// The folder's name, which is how the module is known.
+    pub id: String,
+    pub name: String,
+    /// What module.prop says of it: its version and who made it.
+    pub note: String,
+    /// Its own words about what it does.
+    pub about: String,
+    pub enabled: bool,
+    /// Marked to be removed the next time the phone starts.
+    pub removing: bool,
+}
+
 pub struct State {
     /// The language the pages speak.
     pub lang: Lang,
@@ -281,6 +296,12 @@ pub struct State {
     pub avb: Option<Result<AvbInfo, String>>,
     /// How an AVB change or backup ended.
     pub avb_notice: Option<String>,
+    /// The modules installed for the phone's own system, read when the page
+    /// opens: the folder each sits in, what its module.prop says of it, and
+    /// whether it is switched on.
+    pub modules: Option<Result<Vec<ModuleRow>, String>>,
+    /// The module the detail page shows, by its place in the list.
+    pub module_at: Option<usize>,
     /// Where an update the system installed stands, as the runtime last
     /// read it.
     pub update: Standing,
@@ -427,6 +448,8 @@ impl Default for State {
             image_asking: None,
             avb: None,
             avb_notice: None,
+            modules: None,
+            module_at: None,
             update: Standing::None,
             wlan: None,
             wlan_auto: false,

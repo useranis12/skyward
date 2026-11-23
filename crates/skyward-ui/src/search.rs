@@ -73,6 +73,12 @@ pub const ENTRIES: &[Entry] = &[
         &["renwu", "rw", "task", "tasks", "jindu", "jd", "progress"],
     ),
     entry(
+        ["模块", "模組", "Modules"],
+        ADVANCED,
+        Screen::Modules,
+        &["mokuai", "mk", "module", "modules", "magisk", "zhiyu"],
+    ),
+    entry(
         ["AVB 校验", "AVB 驗證", "AVB verification"],
         ADVANCED,
         Screen::Avb,

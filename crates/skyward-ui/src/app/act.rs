@@ -653,6 +653,17 @@ impl App {
                 self.state.image_to_drive = drive;
                 self.refresh();
             }
+            Action::ModuleOpen(k) => {
+                self.state.module_at = Some(k);
+                self.open(Screen::ModuleInfo);
+            }
+            Action::ModuleToggle(k) => return self.module_switch(k),
+            Action::ModuleRemove(k) => return self.module_remove(k),
+            Action::SearchModules => {
+                self.state.search.clear();
+                self.state.layer = Layer::Letters;
+                self.open(Screen::Search);
+            }
             Action::ReadAvb => {
                 self.state.avb = None;
                 self.refresh();
@@ -795,6 +806,21 @@ impl App {
             self.refresh();
         }
         Vec::new()
+    }
+
+    /// Turn the module at `k` on or off, as its own folder's `disable` flag
+    /// says.
+    fn module_switch(&mut self, k: usize) -> Vec<Effect> {
+        let Some(Ok(rows)) = &self.state.modules else { return Vec::new() };
+        let Some(row) = rows.get(k) else { return Vec::new() };
+        vec![Effect::ModuleSwitch(row.id.clone(), !row.enabled)]
+    }
+
+    /// Mark the module at `k` to be removed at the next start, or unmark it.
+    fn module_remove(&mut self, k: usize) -> Vec<Effect> {
+        let Some(Ok(rows)) = &self.state.modules else { return Vec::new() };
+        let Some(row) = rows.get(k) else { return Vec::new() };
+        vec![Effect::ModuleRemove(row.id.clone(), !row.removing)]
     }
 
     /// Turn one AVB check off or on, saying so on the page while it is written.

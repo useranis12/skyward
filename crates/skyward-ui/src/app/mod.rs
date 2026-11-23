@@ -47,6 +47,7 @@ mod input;
 mod install;
 mod keys;
 mod manager;
+mod modules;
 mod mount;
 mod nav;
 mod power;
@@ -75,6 +76,7 @@ pub use frame::*;
 pub use image::*;
 pub use install::*;
 pub use manager::*;
+pub use modules::*;
 pub use mount::*;
 pub use prefs::*;
 pub use reboot::*;
@@ -146,6 +148,8 @@ pub enum Screen {
     Tasks,
     PowerOff,
     Avb,
+    Modules,
+    ModuleInfo,
     /// One of them: what it holds, and what to do to it, with a swipe to
     /// do it.
     Filesystem,
@@ -451,6 +455,14 @@ pub enum Action {
     BackupVbmeta,
     /// Restore the saved vbmeta image.
     RestoreVbmeta,
+    /// Open the module at this place in the modules page's list.
+    ModuleOpen(usize),
+    /// Turn the module at this place on or off.
+    ModuleToggle(usize),
+    /// Mark the module at this place to be removed at the next start.
+    ModuleRemove(usize),
+    /// Search the modules.
+    SearchModules,
     /// A control whose work is not wired up yet; touching it says so.
     Unavailable(&'static str),
 }
@@ -709,6 +721,13 @@ pub enum Effect {
     /// Restore the saved vbmeta image, telling how it went with
     /// [`App::avb_ended`].
     RestoreVbmeta,
+    /// Read the modules the phone's own system loads, telling the page with
+    /// [`App::set_modules`].
+    ReadModules,
+    /// Turn a module on or off by its folder name.
+    ModuleSwitch(String, bool),
+    /// Mark a module to be removed at the next start, or unmark it.
+    ModuleRemove(String, bool),
 }
 
 /// How far the lock's knob has to be dragged for the page behind it to show.
