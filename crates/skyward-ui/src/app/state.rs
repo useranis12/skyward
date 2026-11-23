@@ -100,9 +100,6 @@ pub struct ModuleRow {
     pub removing: bool,
 }
 
-/// Choices the pages show and the user changes, and where installing
-/// stands.
-#[derive(Clone, Debug, PartialEq)]
 /// What the search field is looking through: the whole of what the phone
 /// offers, or the entries of one page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -112,6 +109,9 @@ pub enum SearchScope {
     Modules,
 }
 
+/// Choices the pages show and the user changes, and where installing
+/// stands.
+#[derive(Clone, Debug, PartialEq)]
 pub struct State {
     /// The language the pages speak.
     pub lang: Lang,
