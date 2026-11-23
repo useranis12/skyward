@@ -477,6 +477,11 @@ impl Default for State {
 }
 
 impl State {
+    /// The modules read for the page, or why they could not be.
+    pub fn set_modules(&mut self, rows: Result<Vec<ModuleRow>, String>) {
+        self.modules = Some(rows);
+    }
+
     /// The key of the on-screen keyboard a finger holds down.
     pub fn key_held(&self) -> Option<Cap> {
         match self.held {
