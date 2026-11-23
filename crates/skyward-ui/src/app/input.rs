@@ -443,7 +443,7 @@ impl App {
             self.chord = Some((key, now));
             return fx;
         }
-        fx.extend(self.key_down(key, now, now));
+        fx.extend(self.key_down(key, now));
         fx
     }
 
@@ -466,7 +466,7 @@ impl App {
     /// alone `now`, as pressed when it went down.
     pub(super) fn let_chord_go(&mut self, now: u64) -> Vec<Effect> {
         match self.chord.take() {
-            Some((key, at)) => self.key_down(key, at, now),
+            Some((key, at)) => self.key_down(key, at),
             None => Vec::new(),
         }
     }
@@ -494,9 +494,9 @@ impl App {
         Vec::new()
     }
 
-    /// What a button that went down `at` does on its own, `now`: a key
-    /// held is timed from when it went down, the screen goes off from now.
-    fn key_down(&mut self, key: Key, at: u64, now: u64) -> Vec<Effect> {
+    /// What a button that went down `at` does on its own: a key held is
+    /// timed from when it went down.
+    fn key_down(&mut self, key: Key, at: u64) -> Vec<Effect> {
         match key {
             Key::Back => {
                 self.button = Some((key, Press::Spent));
