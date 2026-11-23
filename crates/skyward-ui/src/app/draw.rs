@@ -224,15 +224,15 @@ impl App {
         }
         if let (Ok(face), Some(b)) = (f.face(400.0), info.battery.as_ref()) {
             // The level is always said, and while a cable is in, what it is
-            // taking: 85% \u00b7 charging \u00b7 18W.
+            // taking: 85% · 充电中 · 18W.
             let percent = format!("{}%", b.level);
             let note = match b.plugged {
                 true => match b.watts() {
-                    Some(watts) => format!("{percent} \u00b7 {} \u00b7 {watts:.0}W", self.state.lang.pick(["\u5145\u7535\u4e2d", "\u5145\u96fb\u4e2d", "Charging"])),
-                    None => format!("{percent} \u00b7 {}", self.state.lang.pick(["\u5145\u7535\u4e2d", "\u5145\u96fb\u4e2d", "Charging"])),
+                    Some(watts) => format!("{percent} \u{00b7} {} \u{00b7} {watts:.0}W", self.state.lang.pick(["充电中", "充電中", "Charging"])),
+                    None => format!("{percent} \u{00b7} {}", self.state.lang.pick(["充电中", "充電中", "Charging"])),
                 },
                 false => match b.watts() {
-                    Some(watts) => format!("{percent} \u00b7 {watts:.0}W"),
+                    Some(watts) => format!("{percent} \u{00b7} {watts:.0}W"),
                     None => percent,
                 },
             };
