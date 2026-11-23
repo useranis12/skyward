@@ -60,6 +60,18 @@ impl App {
     /// The data partition is open: every user's own files with it, or
     /// those of `waiting`, the user and the control their screen lock is
     /// answered with, still closed.
+    /// The picture the phone shows for its owner has been read, and the name
+    /// it gives itself: the home page shows them over the phone's own row.
+    pub fn set_avatar(&mut self, picture: crate::avatar::Avatar) {
+        self.state.avatar = Some(picture);
+        self.refresh();
+    }
+
+    pub fn set_device_name(&mut self, name: String) {
+        self.state.device_name = Some(name);
+        self.refresh();
+    }
+
     pub fn data_waiting(&mut self, waiting: Option<(u32, Keys)>) {
         self.state.data = match waiting {
             Some((user, keys)) => Data::Locked { user, keys, checking: false },

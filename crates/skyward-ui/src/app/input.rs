@@ -414,14 +414,30 @@ impl App {
         {
             return self.screenshot(key, now);
         }
+        // The power key and volume up together open the reboot page over the
+        // page shown, as holding the power key does, whichever of the two went
+        // down first: the power key waiting on its partner or held on no
+        // control, or volume up held while the power key comes down.
+        let reboot = matches!(
+            (key, self.chord),
+            (Key::VolumeUp, Some((Key::Power, at))) if now < at + CHORD_MS
+        ) || matches!(
+            (key, self.button),
+            (Key::VolumeUp, Some((Key::Power, Press::Sleep { .. }))) | (Key::Power, Some((Key::VolumeUp, Press::Volume { .. })))
+        );
+        if reboot {
+            return self.reboot_page(now);
+        }
         let mut fx = self.let_chord_go();
         if !self.display_on {
             // The power key lights the dark panel, and does only that, as on
             // the phone's own system; the other keys leave it dark.
             if key == Key::Power {
                 self.wake(now);
+                self.button = Some((key, Press::Sleep { at: now, dark: true }));
+            } else {
+                self.button = Some((key, Press::Spent));
             }
-            self.button = Some((key, Press::Spent));
             return fx;
         }
         // A key other than power sends the charging screen away for the
@@ -460,6 +476,27 @@ impl App {
         }
         fx.push(Effect::Screenshot { storage: self.state.place_open(Place::Storage) });
         fx
+    }
+
+    /// The power key and volume up went down together, or the power key was
+    /// held long enough: the reboot page opens over the page shown, so going
+    /// back from it comes to the page the keys were pressed on.
+    pub(super) fn reboot_page(&mut self, now: u64) -> Vec<Effect> {
+        self.chord = None;
+        self.stir(now);
+        self.button = Some((Key::Power, Press::Spent));
+        // The lock is not to be got past: the power key held, or with volume
+        // up, has to slide it away first.
+        if self.lock.is_some() {
+            return Vec::new();
+        }
+        // On the reboot page already, there is nothing to open it over.
+        if self.screen() == Screen::Reboot {
+            return Vec::new();
+        }
+        self.open(Screen::Reboot);
+        self.refresh();
+        Vec::new()
     }
 
     /// The key waiting for its partner in a screenshot does what it does

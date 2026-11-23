@@ -51,7 +51,7 @@ use skyward_ui::app::{
 };
 use skyward_ui::settings::Keeper;
 use skyward_ui::surface::kms::KmsSurface;
-use skyward_ui::{Canvas, Fonts, Lang, Surface};
+use skyward_ui::{avatar, Canvas, Fonts, Lang, Surface};
 use skyward_vab::{Merge, Standing};
 use std::collections::{BTreeSet, VecDeque};
 use std::fs;
@@ -899,7 +899,42 @@ fn show_closed(app: &mut App, closed: &[Closed]) -> Result<()> {
         (c.user, keys)
     });
     app.data_waiting(waiting);
+    // The picture and the name are kept on the partition just opened, so they
+    // are read here, once, and the home page shows them from then on.
+    if closed.is_empty() {
+        read_account(app);
+    }
     Ok(())
+}
+
+/// Read the account's picture and the name the phone gives itself, once the
+/// partition they are kept on is open: both are there and nowhere else, so the
+/// home page shows them only from then on. A phone with neither keeps the row
+/// it showed before, which is the model and the stand-in the system draws.
+fn read_account(app: &mut App) {
+    // `avatar` is already pixels, the theme having taken the density in.
+    let px = app.theme().m.avatar.round() as u32;
+    match account_picture(px) {
+        Some(picture) => app.set_avatar(picture),
+        None => {
+            let _ = skyward_sys::kmsg("the account's picture is not read");
+        }
+    }
+    match avatar::device_name(Path::new("/data/system/users/0/settings_secure.xml")) {
+        Some(name) => {
+            let _ = skyward_sys::kmsg(&format!("the name the phone goes by is read: {name}"));
+            app.set_device_name(name);
+        }
+        None => match skyward_sys::prop("ro.product.marketname") {
+            Some(model) if !model.trim().is_empty() => {
+                let _ = skyward_sys::kmsg("the name the phone gives itself is not read; its model is shown instead");
+                app.set_device_name(model.trim().to_string());
+            }
+            _ => {
+                let _ = skyward_sys::kmsg("the phone gives itself no name that is read");
+            }
+        },
+    }
 }
 
 /// What the file manager lists for a folder: its entries, folders and
@@ -1032,6 +1067,29 @@ fn install_options(app: &App) -> Options {
 
 /// How often the WLAN page scans while it shows.
 const SCAN_EVERY: Duration = Duration::from_secs(10);
+
+/// The picture the account service keeps for the account the phone is signed
+/// in to: one file, `xiaomi_user_avatar_` and the account's number.
+fn account_picture(px: u32) -> Option<avatar::Avatar> {
+    let dir = Path::new("/data/data/com.xiaomi.account/files");
+    let mut found: Option<std::path::PathBuf> = None;
+    for entry in std::fs::read_dir(dir).ok()? {
+        let path = entry.ok()?.path();
+        let name = path.file_name()?.to_string_lossy();
+        if name.starts_with("xiaomi_user_avatar_") {
+            found = Some(path);
+            break;
+        }
+    }
+    let path = found?;
+    match avatar::Avatar::read(&path, px) {
+        Ok(picture) => Some(picture),
+        Err(e) => {
+            let _ = skyward_sys::kmsg(&format!("the account's picture at {} is not read: {e:#}", path.display()));
+            None
+        }
+    }
+}
 
 fn wlan_worker(w: &Option<wlan::Worker>) -> Result<&wlan::Worker> {
     w.as_ref().context("the phone's WLAN is not brought up")
@@ -1234,6 +1292,10 @@ struct Pages<'a> {
     wlan: Option<wlan::Worker>,
     /// The network whose password is kept, and whether the WLAN has joined it.
     wlan_kept: wlanmem::Kept,
+    /// The account's picture and the phone's own name are read once, as soon
+    /// as the partition they are kept on is open: both are there and nowhere
+    /// else, so the home page shows them only from then on.
+    account_read: bool,
     wlan_joined: bool,
     scanned_at: Instant,
     /// The file being fetched from an address typed on the download page.
@@ -1466,6 +1528,7 @@ impl<'a> Pages<'a> {
             servers: Arc::new(Mutex::new(Vec::new())),
             wlan: None,
             wlan_kept: wlanmem::read(),
+            account_read: false,
             wlan_joined: false,
             scanned_at: Instant::now(),
             fetcher: None,
@@ -1599,7 +1662,20 @@ impl<'a> Pages<'a> {
                 let _ = skyward_sys::kmsg(&format!("the vendor interface's libraries are not open: {e:#}"));
                 None
             });
-            self.wlan = Some(wlan::Worker::start(w.clone(), modules, libraries, self.servers.clone())?);
+            let worker = wlan::Worker::start(w.clone(), modules, libraries, self.servers.clone())?;
+            // The radio is turned on here, where the setting is read, rather
+            // than once the pages are built: asking later put the request after
+            // the key programs had come up, and the driver then made its
+            // interface seconds later than it need have.
+            let kept = wlanmem::read();
+            if kept.auto {
+                worker.send(wlan::Command::On);
+                let _ = skyward_sys::kmsg(match kept.saved {
+                    Some(_) => "the WLAN is opened for the network kept",
+                    None => "the WLAN is opened as the recovery starts, with no network kept",
+                });
+            }
+            self.wlan = Some(worker);
         }
         self.scanned_at = Instant::now();
         self.app.state.update_server = cfg.update.is_some();

@@ -1662,6 +1662,23 @@ pub fn list_toned(c: &mut Canvas, t: &Theme, f: &Fonts, top: f32, rows: &[Row], 
 /// Account-style card: avatar, name and detail, then optional rows. The
 /// first rect returned covers the name row.
 pub fn device_card(c: &mut Canvas, t: &Theme, f: &Fonts, top: f32, title: &str, sub: &str, rows: &[Row]) -> Block {
+    device_card_with(c, t, f, top, title, sub, rows, None)
+}
+
+/// The phone's own row, with the picture the account service keeps for its
+/// owner where one has been read. The picture is laid over the card as it is:
+/// what it leaves clear is transparent, and the card shows through where the
+/// circle is not.
+pub fn device_card_with(
+    c: &mut Canvas,
+    t: &Theme,
+    f: &Fonts,
+    top: f32,
+    title: &str,
+    sub: &str,
+    rows: &[Row],
+    avatar: Option<&crate::avatar::Avatar>,
+) -> Block {
     let m = &t.m;
     let lays: Vec<Layout> = rows.iter().map(|r| layout(c, t, f, r)).collect();
     let h = m.account_row_h + lays.iter().map(|l| l.h).sum::<f32>();
@@ -1671,8 +1688,17 @@ pub fn device_card(c: &mut Canvas, t: &Theme, f: &Fonts, top: f32, title: &str, 
     let cy = top + m.account_row_h / 2.0;
     let av = m.avatar;
     let acx = card_x + m.avatar_inset + av / 2.0;
-    c.fill_circle(acx, cy, av / 2.0, t.pal.avatar);
-    icons::glyph(c, Icon::Phone, acx, cy, av * 0.86, t.pal.avatar_glyph);
+    match avatar {
+        Some(picture) => {
+            let mut small = Canvas::new(picture.size, picture.size);
+            small.data.copy_from_slice(&picture.rgba);
+            c.lay(&small, (acx - av / 2.0) as i32, (cy - av / 2.0) as i32, 1.0);
+        }
+        None => {
+            c.fill_circle(acx, cy, av / 2.0, t.pal.avatar);
+            icons::glyph(c, Icon::Phone, acx, cy, av * 0.86, t.pal.avatar_glyph);
+        }
+    }
 
     let tx = card_x + m.inner + m.icon + m.icon_gap;
     let (tt, tb) = f.heading.ink(m.account_title_px);

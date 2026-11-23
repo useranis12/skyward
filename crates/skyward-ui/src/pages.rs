@@ -291,7 +291,12 @@ pub fn home(cx: &Ctx) -> Frame {
         rows.push(Row::new(l.pick(SECOND_FAILED)).icon(RED, Icon::Systems).subtitle(why).trail(Trail::Arrow));
         opens.push(Some(Action::Open(Screen::Systems)));
     }
-    let card = widgets::device_card(&mut c, t, f, y, &i.model, &sub, &rows);
+    // The name the owner gave the phone wins over the model it calls itself
+    // by, and the picture the account service keeps for them is laid over the
+    // row where one has been read: both are kept on the partition the recovery
+    // opens, so both are absent until it is.
+    let name = cx.state.device_name.as_deref().unwrap_or(&i.model);
+    let card = widgets::device_card_with(&mut c, t, f, y, name, &sub, &rows, cx.state.avatar.as_ref());
     out.push(Hit { rect: card.rows[0], action: Action::Open(Screen::About) });
     out.extend(card.rows[1..].iter().zip(&opens).filter_map(|(&rect, open)| open.map(|action| Hit { rect, action })));
     y = card.bottom + t.m.card_gap;
@@ -2486,7 +2491,9 @@ const STOP: Text = ["停止", "停止", "Stop"];
 /// Tools for the experienced.
 pub fn advanced(cx: &Ctx) -> Frame {
     let (t, f, l) = (cx.t, cx.f, cx.state.lang);
-    let mut c = page(cx);
+    // A long page: fifteen rows reach past one screen, and a page cut to one
+    // screen has nothing to scroll, so the last rows would be out of reach.
+    let mut c = long_page(cx);
     let top = t.m.content_top;
     let tools = widgets::list(&mut c, t, f, top, &[
         Row::new(l.pick(FILES)).icon(BLUE, Icon::Folder),
@@ -2520,7 +2527,7 @@ pub fn advanced(cx: &Ctx) -> Frame {
         Action::Open(Screen::Modules),
         Action::Open(Screen::DataApps),
     ]);
-    Frame::new(t, c, out, l.pick(ADVANCED), top)
+    Frame::new(t, fit(c, t, tools.bottom), out, l.pick(ADVANCED), top)
 }
 
 const RELABEL: Text = ["修复 SELinux 上下文", "修復 SELinux 上下文", "Fix SELinux contexts"];

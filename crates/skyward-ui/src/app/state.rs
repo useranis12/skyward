@@ -212,6 +212,12 @@ pub struct State {
     /// Where the data partition stands, and what is typed at the screen
     /// lock its users' own files wait on.
     pub data: Data,
+    /// The picture the phone shows for its owner, once the partition it is
+    /// kept on is open. `None` until then, and where none is kept: the row
+    /// shows the phone's own stand-in instead.
+    pub avatar: Option<crate::avatar::Avatar>,
+    /// The name the owner gave the phone, read from the same partition.
+    pub device_name: Option<String>,
     pub code: String,
     /// How far along the bar under the sign is while the data partition is
     /// being opened, 0 to 1.
@@ -395,7 +401,13 @@ impl Default for State {
             // Two minutes.
             screen_off: 3,
             time_zone: 0,
-            double_tap: false,
+            avatar: None,
+            device_name: None,
+            // The panel's controller takes no command that turns its own double
+            // tap on, so the two taps are counted here. It is on to begin with,
+            // as it is on the phone's own system: a panel that stays dark when
+            // tapped reads as broken rather than as a setting left off.
+            double_tap: true,
             double_tap_supported: false,
             vibrate: true,
             vibration: SLIDER_START,

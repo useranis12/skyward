@@ -1612,6 +1612,10 @@ impl App {
                 self.dirty = true;
             } else {
                 self.button = Some((key, Press::Spent));
+                // Under no lock, the hold opens the reboot page over the page
+                // shown, as a phone's long press does. A press that only lit a
+                // dark panel opens it too: that is what the phone does.
+                fx.extend(self.reboot_page(now));
             }
         }
         let active = *self.active.get_or_insert(now);
