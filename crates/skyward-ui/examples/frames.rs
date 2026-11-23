@@ -361,6 +361,7 @@ fn info() -> DeviceInfo {
             design: None,
             full: None,
             voltage: None,
+            current: Some(-2_400_000),
             quick: false,
             plugged: true,
         }),
