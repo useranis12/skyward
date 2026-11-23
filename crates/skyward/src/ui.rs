@@ -80,10 +80,6 @@ const TOUCH_WAIT: Duration = Duration::from_secs(5);
 /// charged at the step the last one chose.
 const THERMAL_SETTLE_MS: u64 = 60_000;
 
-/// How long a panel gone dark rests, ready to light again at once, before
-/// the display turns off; the phone's own system keeps its panel dozing
-/// about as long after the screen goes off.
-const REST: Duration = Duration::from_secs(5);
 
 /// Where logs saved to the temporary folder go, in the recovery service's
 /// own folder, and where in internal storage the others do.
@@ -902,11 +898,9 @@ fn show_closed(app: &mut App, closed: &[Closed]) -> Result<()> {
     Ok(())
 }
 
-/// Read the account's picture and the name the phone gives itself, once the
-/// partition they are kept on is open: both are there and nowhere else, so the
-/// home page shows them only from then on. A phone with neither keeps the row
-/// it showed before, which is the model and the stand-in the system draws.
-fn read_account(app: &mut App) {
+/// Read the picture the account service keeps for the phone's owner. It is
+/// kept among that user's own files, so it is read only once those are open.
+fn read_picture(app: &mut App) {
     // `avatar` is already pixels, the theme having taken the density in.
     let px = app.theme().m.avatar.round() as u32;
     match account_picture(px) {
@@ -915,6 +909,12 @@ fn read_account(app: &mut App) {
             let _ = skyward_sys::kmsg("the account's picture is not read");
         }
     }
+}
+
+/// Read the name the phone gives itself. It is kept in the user's settings,
+/// which sit on the data partition's device-encrypted half: that half is open
+/// as soon as /data is mounted, whether or not the user's own files are.
+fn read_name(app: &mut App) {
     match avatar::device_name(Path::new("/data/system/users/0/settings_secure.xml")) {
         Some(name) => {
             let _ = skyward_sys::kmsg(&format!("the name the phone goes by is read: {name}"));
@@ -1212,8 +1212,6 @@ struct Pages<'a> {
     /// Whether the panel's frame memory has been blacked out for an off
     /// panel; cleared once a real frame is shown again.
     blanked: bool,
-    /// When the panel gone dark began to rest.
-    rested_at: Option<Instant>,
     /// Started for fastboot, the port goes to the phone's own fastbootd. The
     /// page says whether it came up and how far a computer has the port;
     /// why it did not come up goes to the kernel log and on screen.
@@ -1287,9 +1285,11 @@ struct Pages<'a> {
     wlan: Option<wlan::Worker>,
     /// The network whose password is kept, and whether the WLAN has joined it.
     wlan_kept: wlanmem::Kept,
-    /// The account's picture and the phone's own name are read once, as soon
-    /// as the partition they are kept on is open: both are there and nowhere
-    /// else, so the home page shows them only from then on.
+    /// The phone's own name is read once, as soon as the data partition is
+    /// mounted: it is kept on the half that needs no user's key.
+    name_read: bool,
+    /// The account's picture is read once, as soon as the user's own files are
+    /// open: it is kept among those.
     account_read: bool,
     wlan_joined: bool,
     scanned_at: Instant,
@@ -1490,7 +1490,6 @@ impl<'a> Pages<'a> {
             read_at,
             asked: None,
             blanked: false,
-            rested_at: None,
             fastboot,
             port_at,
             transfer,
@@ -1523,6 +1522,7 @@ impl<'a> Pages<'a> {
             servers: Arc::new(Mutex::new(Vec::new())),
             wlan: None,
             wlan_kept: wlanmem::read(),
+            name_read: false,
             account_read: false,
             wlan_joined: false,
             scanned_at: Instant::now(),
@@ -1648,33 +1648,54 @@ impl<'a> Pages<'a> {
             }
             self.app.set_update(standing);
         }
+        // The WLAN's switches show what the file keeps, not what the state was
+        // built with: otherwise all three read off however they were left.
+        let kept = wlanmem::read();
+        self.app.state.wlan_auto = kept.auto;
+        self.app.state.wlan_keep = kept.keep;
+        self.wlan_kept = kept.clone();
         // The WLAN starts off. Without the bundle of the vendor interface's
         // libraries the supplicant does not start, and the WLAN page says why.
         if let Some(w) = &cfg.wlan {
             self.app.state.wlan = Some(Wlan::default());
-            let modules = cfg.modules.sources.iter().map(|s| skyward_modules::source_dir(s)).collect::<Result<Vec<_>>>()?;
-            let libraries = secure::libraries().unwrap_or_else(|e| {
-                let _ = skyward_sys::kmsg(&format!("the vendor interface's libraries are not open: {e:#}"));
-                None
-            });
-            let worker = wlan::Worker::start(w.clone(), modules, libraries, self.servers.clone())?;
-            // The radio is turned on here, where the setting is read, rather
-            // than once the pages are built: asking later put the request after
-            // the key programs had come up, and the driver then made its
-            // interface seconds later than it need have.
-            let kept = wlanmem::read();
-            if kept.auto {
-                worker.send(wlan::Command::On);
-                let _ = skyward_sys::kmsg(match kept.saved {
-                    Some(_) => "the WLAN is opened for the network kept",
-                    None => "the WLAN is opened as the recovery starts, with no network kept",
-                });
-            }
-            self.wlan = Some(worker);
+            self.start_wlan(w, &cfg.modules.sources)?;
         }
         self.scanned_at = Instant::now();
         self.app.state.update_server = cfg.update.is_some();
         self.drive_at = Instant::now();
+        Ok(())
+    }
+
+    /// Start the WLAN's supplicant, and turn the radio on where the setting
+    /// says it should be. It waits for the partition the phone keeps its
+    /// address on: the driver reads the address from there, and one started
+    /// before it is mounted comes up with no address and no WLAN at all.
+    fn start_wlan(&mut self, w: &skyward_config::Wlan, sources: &[String]) -> Result<()> {
+        const ADDRESS: &str = "/mnt/vendor/persist/kiwi_v2/wlan_mac.bin";
+        const WAIT: Duration = Duration::from_secs(20);
+        let began = Instant::now();
+        while !Path::new(ADDRESS).exists() {
+            if began.elapsed() >= WAIT {
+                skyward_sys::kmsg(&format!("{ADDRESS} is not there after {WAIT:?}; the WLAN is started anyway"))?;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let modules = sources.iter().map(|s| skyward_modules::source_dir(s)).collect::<Result<Vec<_>>>()?;
+        let libraries = secure::libraries().unwrap_or_else(|e| {
+            let _ = skyward_sys::kmsg(&format!("the vendor interface's libraries are not open: {e:#}"));
+            None
+        });
+        let worker = wlan::Worker::start(w.clone(), modules, libraries, self.servers.clone())?;
+        let kept = wlanmem::read();
+        if kept.auto {
+            worker.send(wlan::Command::On);
+            let _ = skyward_sys::kmsg(match kept.saved {
+                Some(_) => "the WLAN is opened for the network kept",
+                None => "the WLAN is opened as the recovery starts, with no network kept",
+            });
+        }
+        self.wlan = Some(worker);
         Ok(())
     }
 
@@ -1872,17 +1893,14 @@ impl<'a> Pages<'a> {
             // Lit, a panel that came on again switches to its fastest
             // refresh.
             self.surface.speed_up()?;
-            self.rested_at = None;
         } else if self.surface.is_on() {
-            // With the backlight off, the panel rests, and the touch
-            // controller following it stops drawing power.
-            self.surface.rest()?;
-            self.rested_at = Some(Instant::now());
-        } else if self.rested_at.is_some_and(|at| at.elapsed() >= REST) {
-            // Rested long enough, the display goes off: the panel and the
-            // display processor feeding it stop drawing power.
+            // With the backlight off, the display goes off at once rather than
+            // resting in its low-power mode first. That mode leaves the panel
+            // lit just enough to see in a dark room, which reads as a screen
+            // that will not go out, and it is only worth its wait on a phone
+            // that lights from it quickly enough to be noticed. This one does
+            // not: coming back from off is what the phone's own system does.
             self.surface.turn_off()?;
-            self.rested_at = None;
         }
         Ok((panel.is_some(), shown))
     }
@@ -1899,9 +1917,7 @@ impl<'a> Pages<'a> {
         // gets at least a millisecond.
         let floor = if shown { 0 } else { 1 };
         let until_due = self.app.deadline(now).map(|d| d.saturating_sub(now) as i32);
-        // A resting panel turns off once its rest is over.
-        let rest_left = self.rested_at.map(|at| REST.saturating_sub(at.elapsed()).as_millis() as i32);
-        let timeout = if ahead { 0 } else { until_due.into_iter().chain(rest_left).min().map_or(1000, |t| t.clamp(floor, 1000)) };
+        let timeout = if ahead { 0 } else { until_due.map_or(1000, |t| t.clamp(floor, 1000)) };
         sleeper.allow(self.may_sleep()?);
         let mut fds = vec![self.inputs.fd(), uevents.fd(), sleeper.fd()];
         if let Some(i) = &self.installer {
@@ -2130,9 +2146,13 @@ impl Pages<'_> {
                     // opened, so they are read once, as soon as nothing of the
                     // user's is left closed: the home page shows them from then
                     // on, and the row it showed before until then.
+                    if !self.name_read && matches!(self.app.state.data, Data::Open) {
+                        self.name_read = true;
+                        read_name(&mut self.app);
+                    }
                     if !self.account_read && self.closed.is_empty() && matches!(self.app.state.data, Data::Open) {
                         self.account_read = true;
-                        read_account(&mut self.app);
+                        read_picture(&mut self.app);
                     }
                 }
                 wipe::Event::Ended(outcome) => {
@@ -2670,9 +2690,13 @@ impl Pages<'_> {
                 // opened, so they are read once, as soon as nothing of the
                 // user's is left closed: the home page shows them from then on,
                 // and the row it showed before until then.
+                if !self.name_read && matches!(self.app.state.data, Data::Open) {
+                    self.name_read = true;
+                    read_name(&mut self.app);
+                }
                 if !self.account_read && self.closed.is_empty() && matches!(self.app.state.data, Data::Open) {
                     self.account_read = true;
-                    read_account(&mut self.app);
+                    read_picture(&mut self.app);
                 }
             }
             decrypt::Ended::Opened(Err(why)) => {
@@ -2693,9 +2717,13 @@ impl Pages<'_> {
                 // opened, so they are read once, as soon as nothing of the
                 // user's is left closed: the home page shows them from then on,
                 // and the row it showed before until then.
+                if !self.name_read && matches!(self.app.state.data, Data::Open) {
+                    self.name_read = true;
+                    read_name(&mut self.app);
+                }
                 if !self.account_read && self.closed.is_empty() && matches!(self.app.state.data, Data::Open) {
                     self.account_read = true;
-                    read_account(&mut self.app);
+                    read_picture(&mut self.app);
                 }
             }
             decrypt::Ended::Unlocked(Err(why)) => {

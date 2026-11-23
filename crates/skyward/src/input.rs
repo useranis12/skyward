@@ -284,14 +284,19 @@ impl Inputs {
             loop {
                 thread::sleep(TOUCH_REFRESH);
                 for w in &writes {
-                    // Written each round even when the file already reads
-                    // what is wanted: the driver's reset at sleep does not
-                    // always show in this node, and a skipped write then
-                    // leaves the panel unable to report a tap at all.
+                    // Written only where the node reads something else. Some
+                    // of these nodes make the controller switch its own mode
+                    // as they are written, and a write each second leaves it
+                    // switching mode each second, which cuts the finger's
+                    // reports short -- the panel then reports a checksum
+                    // error instead of a touch, and a tap never arrives.
+                    if fs::read_to_string(&w.path).is_ok_and(|now| now.trim() == w.value.trim()) {
+                        continue;
+                    }
                     if fs::write(&w.path, &w.value).is_err() {
                         continue;
                     }
-                    let _ = skyward_sys::kmsg(&format!("wrote {} to {} for the touchscreen again", w.value, w.path));
+                    let _ = skyward_sys::kmsg(&format!("wrote {} to {} for the touchscreen", w.value, w.path));
                 }
             }
         });

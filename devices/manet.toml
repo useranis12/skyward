@@ -20,13 +20,20 @@ sources = ["vendor_boot", "vendor_dlkm", "vendor", "system_dlkm"]
 load = ["goodix_core", "xiaomi_touch", "stm_nfc_i2c", "nxp-nci"]
 
 [touch]
-# Only the raw-touch switch is written. The double tap and AOD nodes are not:
-# each write to either makes the controller switch its own mode, and the touch
-# thread writes every node here once a second, so a node in this list is a
-# controller switching mode once a second -- which cuts the finger's reports
-# short and leaves the panel reporting a checksum error instead of a touch.
-# The two taps that light the dark panel are counted in the UI instead.
-writes = [{ path = "/sys/class/touch/touch_dev/enable_touch_raw", value = "0" }]
+# The double-tap node is what keeps the panel's controller awake while the
+# screen is dark. Without it the controller stops with the panel, and a tap on
+# a dark screen never reaches the recovery at all: the log shows no finger
+# report at all across a dark stretch, and the gesture type read back as 0.
+# With it, the controller keeps watching, and the two taps are counted here.
+#
+# Writing the node makes the controller switch its own mode, so the thread
+# that keeps these written reads each one first and writes only where it reads
+# something else. Writing them once a second regardless left the controller
+# switching mode once a second, which cut every finger report short.
+writes = [
+    { path = "/sys/class/touch/touch_dev/enable_touch_raw", value = "0" },
+    { path = "/sys/devices/platform/goodix_ts.0/double_tap_enable", value = "state:enabled\n" },
+]
 
 
 # Stage the shared libraries the key services ask for that the recovery's
