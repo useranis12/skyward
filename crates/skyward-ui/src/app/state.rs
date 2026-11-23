@@ -103,6 +103,15 @@ pub struct ModuleRow {
 /// Choices the pages show and the user changes, and where installing
 /// stands.
 #[derive(Clone, Debug, PartialEq)]
+/// What the search field is looking through: the whole of what the phone
+/// offers, or the entries of one page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SearchScope {
+    Features,
+    Apps,
+    Modules,
+}
+
 pub struct State {
     /// The language the pages speak.
     pub lang: Lang,
@@ -302,6 +311,18 @@ pub struct State {
     pub modules: Option<Result<Vec<ModuleRow>, String>>,
     /// The module the detail page shows, by its place in the list.
     pub module_at: Option<usize>,
+    /// The apps the owner installed, read when the page opens.
+    pub apps: Option<Result<Vec<crate::app::dataapp::DataApp>, String>>,
+    /// The app the detail page shows, by its place in the list.
+    pub app_at: Option<usize>,
+    /// The apps the system's own partitions hold, read once.
+    pub sys_apps: Option<Vec<crate::app::dataapp::DataApp>>,
+    /// Which page of the apps list is shown.
+    pub app_page: usize,
+    /// Which page of the system apps list is shown.
+    pub sys_page: usize,
+    /// What the search field is looking through.
+    pub search_scope: SearchScope,
     /// Where an update the system installed stands, as the runtime last
     /// read it.
     pub update: Standing,
@@ -450,6 +471,12 @@ impl Default for State {
             avb_notice: None,
             modules: None,
             module_at: None,
+            apps: None,
+            app_at: None,
+            sys_apps: None,
+            app_page: 0,
+            sys_page: 0,
+            search_scope: SearchScope::Features,
             update: Standing::None,
             wlan: None,
             wlan_auto: false,
@@ -480,6 +507,11 @@ impl State {
     /// The modules read for the page, or why they could not be.
     pub fn set_modules(&mut self, rows: Result<Vec<ModuleRow>, String>) {
         self.modules = Some(rows);
+    }
+
+    /// The apps read for the page, or why they could not be.
+    pub fn set_apps(&mut self, rows: Result<Vec<crate::app::dataapp::DataApp>, String>) {
+        self.apps = Some(rows);
     }
 
     /// The key of the on-screen keyboard a finger holds down.

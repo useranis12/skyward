@@ -95,6 +95,9 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::PowerOff => power_off(cx),
         Screen::Avb => avb(cx),
         Screen::Modules => modules(cx),
+        Screen::DataApps => data_apps(cx),
+        Screen::SystemApps => system_apps(cx),
+        Screen::DataAppInfo => data_app_info(cx),
         Screen::ModuleInfo => module_info(cx),
         Screen::Filesystem => filesystem(cx),
         Screen::PartWork => part_work(cx),
@@ -150,6 +153,7 @@ pub fn confirm_label(which: Confirm, s: &State) -> (&'static str, bool) {
         Confirm::ExportImage(_) => (["滑动以写入镜像", "滑動以寫入映像檔", "Slide to write the image"], true),
         Confirm::ImportImage(_) => (["滑动以写回镜像", "滑動以寫回映像檔", "Slide to write it back"], true),
         Confirm::DeleteImage(_) => (["滑动以删除", "滑動以刪除", "Slide to delete"], true),
+            Confirm::DeleteApp => (["滑动以卸载", "滑動以卸載", "Slide to uninstall"], true),
         Confirm::PowerOff => (["滑动以关机", "滑動以關機", "Slide to power off"], true),
     };
     (s.lang.pick(label), danger)
@@ -2516,6 +2520,8 @@ const TASKS: Text = ["任务", "任務", "Tasks"];
 const POWER_OFF: Text = ["关机", "關機", "Power off"];
 const AVB: Text = ["AVB 校验", "AVB 驗證", "AVB verification"];
 const MODULES: Text = ["模块", "模組", "Modules"];
+const DATA_APPS: Text = ["应用", "應用程式", "Apps"];
+const SYSTEM_APPS: Text = ["系统应用", "系統應用程式", "System apps"];
 const STOPPED: Text = ["已停止", "已停止", "Stopped"];
 const STOPPING: Text = ["正在停止", "正在停止", "Stopping"];
 
@@ -3342,6 +3348,206 @@ pub fn module_info(cx: &Ctx) -> Frame {
 fn pill_hit(t: &Theme, x: f32, y: f32, w: f32, h: f32, action: Action) -> Hit {
     let pad = (t.m.dp(44.0) - h).max(0.0) / 2.0;
     Hit { rect: Rect::new(x - t.m.dp(4.0), y - pad, w + t.m.dp(8.0), h + pad * 2.0), action }
+}
+
+/// How many rows of `sample` fit on a page whose content starts at `top`.
+///
+/// Measured rather than counted from a number: a row with a subtitle under
+/// its name is taller than one without, and the subtitle wraps, so the count
+/// has to come from the row the page actually draws.
+fn rows_that_fit(t: &Theme, f: &Fonts, top: f32, sample: &Row) -> usize {
+    let probe = Canvas::band(t.m.w, 1, 0..1, 0..t.m.w, t.pal.bg);
+    let h = widgets::one_height(&probe, t, f, sample);
+    // Half a row is left over at the foot, so that the last one is not cut in
+    // half by the bottom margin.
+    let room = t.m.h as f32 - top - t.m.margin * 2.0 - h / 2.0;
+    ((room / h).floor() as usize).max(1)
+}
+
+fn pager(t: &Theme, f: &Fonts, c: &mut Canvas, out: &mut Vec<Hit>, l: Lang, y: f32, page: usize, pages: usize, turn: fn(usize) -> Action) {
+    let ph = t.m.dp(widgets::PILL_DP);
+    if pages <= 1 {
+        let only = l.pick(["只有一页", "只有一頁", "One page"]);
+        let w = widgets::pill_width(c, t, f, only);
+        let x = t.m.w as f32 - t.m.margin - w;
+        widgets::pill(c, t, f, x, y, only, t.pal.search, t.pal.text);
+        return;
+    }
+    let gaps = t.m.dp(widgets::PILL_GAP_DP);
+    let counter = format!("{}/{}", page + 1, pages);
+    let back = l.pick(["上一页", "上一頁", "Newer"]);
+    let fwd = l.pick(["下一页", "下一頁", "Older"]);
+    let w_prev = widgets::pill_width(c, t, f, back);
+    let w_next = widgets::pill_width(c, t, f, fwd);
+    let w_counter = c.text_width(&f.value, &counter, t.m.sub_px) + t.m.dp(8.0);
+    let x_next = t.m.w as f32 - t.m.margin - w_next;
+    let x_counter = x_next - gaps - w_counter;
+    let x_prev = x_counter - gaps - w_prev;
+    let faint = t.pal.subtitle;
+    // The right third of the screen turns the page on: a finger that lands a
+    // little wide still turns it.
+    if page + 1 < pages {
+        out.push(Hit { rect: Rect::new(t.m.w as f32 * 0.66, y - t.m.dp(12.0), t.m.w as f32 * 0.34 - t.m.margin, ph + t.m.dp(24.0)), action: turn(page + 1) });
+    }
+    if page > 0 {
+        let wd = widgets::pill(c, t, f, x_prev, y, back, t.pal.search, t.pal.text);
+        // The way back stops at 62% of the width, leaving the rest to the way
+        // on.
+        let left = x_prev - t.m.dp(16.0);
+        let right = (x_prev + wd + t.m.dp(8.0)).min(t.m.w as f32 * 0.62);
+        out.push(Hit { rect: Rect::new(left, y - t.m.dp(10.0), (right - left).max(wd), ph + t.m.dp(20.0)), action: turn(page - 1) });
+    } else {
+        widgets::pill(c, t, f, x_prev, y, back, t.pal.search, faint);
+    }
+    c.text_center(&f.value, &counter, x_counter + w_counter / 2.0, y + ph / 2.0, t.m.sub_px, faint);
+    if page + 1 < pages {
+        widgets::pill(c, t, f, x_next, y, fwd, t.pal.search, t.pal.text);
+    } else {
+        widgets::pill(c, t, f, x_next, y, fwd, t.pal.search, faint);
+    }
+}
+
+/// The apps the owner installed, newest first, a screen at a time.
+///
+/// Ported from skyward-pudding v0.3.15. A screen holds what fits rather than
+/// the whole list on one tall page: a phone with a hundred and eighty apps
+/// makes a page tens of thousands of pixels tall, which is a canvas of over a
+/// hundred megabytes for every frame.
+pub fn data_apps(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let top = t.m.content_top;
+    let mut c = page(cx);
+    let mut out = Vec::new();
+    let mut sample = Row::new("Ag").icon(PURPLE, Icon::Layers);
+    sample.sub = Some("com.example.app");
+    let per = rows_that_fit(t, f, top, &sample);
+    let mut rows: Vec<Row> = Vec::new();
+    let mut acts: Vec<Action> = Vec::new();
+    let mut pages = 1usize;
+    match &s.apps {
+        None => rows.push(Row::new(l.pick(["正在读取…", "正在讀取…", "Reading…"]))),
+        Some(Err(why)) => {
+            let mut row = Row::new(l.pick(["读取失败", "讀取失敗", "Not read"]));
+            row.sub = Some(why.as_str());
+            rows.push(row);
+        }
+        Some(Ok(list)) if list.is_empty() => rows.push(Row::new(l.pick(["数据分区里没有应用", "資料分區裡沒有應用程式", "No apps in the data partition"]))),
+        Some(Ok(list)) => {
+            pages = list.len().div_ceil(per).max(1);
+            let page = s.app_page.min(pages - 1);
+            let (from, to) = (page * per, ((page + 1) * per).min(list.len()));
+            for (k, a) in list.iter().enumerate().take(to).skip(from) {
+                let mut row = Row::new(&a.label).icon(PURPLE, Icon::Layers);
+                row.sub = Some(a.package.as_str());
+                rows.push(row);
+                acts.push(Action::DataAppOpen(k));
+            }
+        }
+    }
+    let page = s.app_page.min(pages.saturating_sub(1));
+    // The search pill stands on the line the back arrow is on; the pager on
+    // the title's.
+    let ph = t.m.dp(widgets::PILL_DP);
+    let py = t.m.back_cy - ph / 2.0;
+    let pager_y = t.m.title_top + t.m.title_px * 0.46 - ph / 2.0;
+    let mut x = t.m.w as f32 - t.m.margin;
+    let search_label = l.pick(["搜索应用", "搜尋應用程式", "Search apps"]);
+    let w = widgets::pill_width(&c, t, f, search_label);
+    x -= w;
+    let wd = widgets::pill(&mut c, t, f, x, py, search_label, t.pal.search, t.pal.text);
+    out.push(pill_hit(t, x, py, wd, ph, Action::SearchApps));
+    // What the system's own partitions hold is a page of its own, and this is
+    // the way to it.
+    let sys_label = l.pick(SYSTEM_APPS);
+    let w = widgets::pill_width(&c, t, f, sys_label);
+    x -= t.m.dp(widgets::PILL_GAP_DP) + w;
+    let wd = widgets::pill(&mut c, t, f, x, py, sys_label, t.pal.search, t.pal.subtitle);
+    out.push(pill_hit(t, x, py, wd, ph, Action::Open(Screen::SystemApps)));
+    pager(t, f, &mut c, &mut out, l, pager_y, page, pages, Action::AppPage);
+    let listed = widgets::list(&mut c, t, f, top, &rows);
+    out.extend(hits(&listed.rows, &acts));
+    Frame::new(t, c, out, l.pick(DATA_APPS), top)
+}
+
+/// The apps the system's own partitions hold: laid out as the owner's are,
+/// but only to be looked at. There is no switch and no uninstalling, and a
+/// row opens nothing, since taking one of them away keeps the system from
+/// starting.
+///
+/// Ported from skyward-pudding v0.3.15.
+pub fn system_apps(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let top = t.m.content_top;
+    let mut c = page(cx);
+    let mut sample = Row::new("Ag").icon(SLATE, Icon::Layers);
+    sample.sub = Some("/system/app");
+    let per = rows_that_fit(t, f, top, &sample);
+    let mut rows: Vec<Row> = Vec::new();
+    let mut pages = 1usize;
+    match &s.sys_apps {
+        None => rows.push(Row::new(l.pick(["正在读取…", "正在讀取…", "Reading…"]))),
+        Some(list) if list.is_empty() => rows.push(Row::new(l.pick(["没有读到系统应用", "沒有讀到系統應用程式", "No system apps read"]))),
+        Some(list) => {
+            pages = list.len().div_ceil(per).max(1);
+            let page = s.sys_page.min(pages - 1);
+            let (from, to) = (page * per, ((page + 1) * per).min(list.len()));
+            for a in list.iter().take(to).skip(from) {
+                let mut row = Row::new(&a.label).icon(SLATE, Icon::Layers);
+                row.sub = Some(a.package.as_str());
+                rows.push(row);
+            }
+        }
+    }
+    let page = s.sys_page.min(pages.saturating_sub(1));
+    let ph = t.m.dp(widgets::PILL_DP);
+    let pager_y = t.m.title_top + t.m.title_px * 0.46 - ph / 2.0;
+    let mut out = Vec::new();
+    pager(t, f, &mut c, &mut out, l, pager_y, page, pages, Action::SysPage);
+    let listed = widgets::list(&mut c, t, f, top, &rows);
+    let bottom = widgets::footnote(&mut c, t, f, listed.bottom, l.pick(["这些装在系统分区里，不能这样卸载", "這些裝在系統分區裡，不能這樣卸載", "These are in the system's partitions, and are not removed here"]));
+    Frame::new(t, fit(c, t, bottom), out, l.pick(SYSTEM_APPS), top)
+}
+
+/// One app: what it is, and the swipe that takes it off.
+///
+/// Ported from skyward-pudding v0.3.15.
+pub fn data_app_info(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let mut c = long_page(cx);
+    let top = t.m.content_top;
+    let at = s.app_at.unwrap_or(0);
+    let picked = match &s.apps {
+        Some(Ok(list)) => list.get(at),
+        _ => None,
+    };
+    let Some(a) = picked else {
+        return Frame::new(t, c, Vec::new(), l.pick(DATA_APPS), top);
+    };
+    let facts: Vec<(&str, String)> = vec![
+        (l.pick(["包名", "套件名稱", "Package"]), a.package.clone()),
+        (l.pick(["名称", "名稱", "Name"]), a.label.clone()),
+        (l.pick(["位置", "位置", "Where"]), a.dir.clone()),
+        (l.pick(["占用", "佔用", "Size"]), fmt::file_size(a.size)),
+        (l.pick(["安装", "安裝", "Installed"]), fmt::datetime(l, a.installed, s.time_zone)),
+        (l.pick(["更新", "更新", "Updated"]), fmt::datetime(l, a.updated, s.time_zone)),
+    ];
+    let y = widgets::info_card(&mut c, t, f, top, &facts);
+    // An app in the system's own partitions is not taken off from here: the
+    // system would not start.
+    let mut out = Vec::new();
+    let bottom = if a.system {
+        let row = Row::new(l.pick(["系统应用，不能这样卸载", "系統應用程式，不能這樣卸載", "A system app: not removed here"])).icon(SLATE, Icon::Shield);
+        let listed = widgets::list(&mut c, t, f, y + t.m.card_gap, &[row]);
+        widgets::footnote(&mut c, t, f, listed.bottom, l.pick(["这些装在系统分区里，删掉系统就起不来", "這些裝在系統分區裡，刪掉系統就起不來", "These are in the system's partitions; taking one away keeps it from starting"]))
+    } else {
+        let row = Row::new(l.pick(["卸载应用", "卸載應用程式", "Uninstall"])).icon(RED, Icon::Wipe).tint(t.pal.danger);
+        let listed = widgets::list(&mut c, t, f, y + t.m.card_gap, &[row]);
+        let (label, danger) = confirm_label(Confirm::DeleteApp, s);
+        let track = widgets::confirm(&mut c, t, f, listed.bottom + t.m.dp(24.0), label, danger, s.confirm);
+        out.push(Hit { rect: track, action: Action::Confirm(Confirm::DeleteApp) });
+        widgets::footnote(&mut c, t, f, track.y + track.h, l.pick(["卸载会删掉它的安装目录和 /data/data 里的数据", "卸載會刪掉它的安裝目錄和 /data/data 裡的資料", "Uninstalling removes its folder and what it kept in /data/data"]))
+    };
+    Frame::new(t, fit(c, t, bottom), out, l.pick(DATA_APPS), top)
 }
 
 /// What a partition holds, as its row and page name it: the data

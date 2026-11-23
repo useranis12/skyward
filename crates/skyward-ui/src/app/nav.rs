@@ -292,6 +292,8 @@ impl App {
             Screen::ImageBackup => vec![Effect::ReadImages],
             Screen::Avb => vec![Effect::ReadAvb],
             Screen::Modules => vec![Effect::ReadModules],
+            Screen::DataApps => vec![Effect::ReadDataApps],
+            Screen::SystemApps => vec![Effect::ReadSystemApps],
             Screen::Slot | Screen::Reboot => vec![Effect::ReadSlots],
             Screen::Systems => vec![Effect::ReadSystems],
             Screen::Restore => vec![self.find_backups()],

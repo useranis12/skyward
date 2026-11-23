@@ -655,6 +655,32 @@ impl App {
             }
             // A zip on the file page becomes a module: it must carry a
             // module.prop for the phone to know what it is.
+            Action::Confirm(Confirm::DeleteApp) => {
+                if let Some(at) = self.state.app_at
+                    && let Some(Ok(list)) = &self.state.apps
+                    && let Some(a) = list.get(at)
+                {
+                    return vec![Effect::DataAppRemove(a.package.clone(), a.dir.clone())];
+                }
+            }
+            Action::DataAppOpen(k) => {
+                self.state.app_at = Some(k);
+                self.open(Screen::DataAppInfo);
+            }
+            Action::AppPage(k) => {
+                self.state.app_page = k;
+                self.refresh();
+            }
+            Action::SysPage(k) => {
+                self.state.sys_page = k;
+                self.refresh();
+            }
+            Action::SearchApps => {
+                self.state.search_scope = SearchScope::Apps;
+                self.state.search.clear();
+                self.state.layer = Layer::Letters;
+                self.open(Screen::Search);
+            }
             Action::InstallAsModule => {
                 let Some(e) = &self.state.file else { return Vec::new() };
                 let zip = e.name.to_lowercase().ends_with(".zip");
@@ -734,8 +760,20 @@ impl App {
             Cap::Show(layer) => self.state.layer = layer,
             Cap::Enter => match self.screen() {
                 Screen::Search => {
-                    if let Some(first) = search::find_on(&self.state.search, l, |screen| self.state.offers(screen)).first() {
-                        return self.act(Action::Open(first.screen), now);
+                    let query = self.state.search.trim().to_lowercase();
+                    match self.state.search_scope {
+                        SearchScope::Features => {
+                            if let Some(first) = search::find_on(&self.state.search, l, |screen| self.state.offers(screen)).first() {
+                                return self.act(Action::Open(first.screen), now);
+                            }
+                        }
+                        scope => {
+                            let Some(first) = self.first_match(scope, &query) else { return Vec::new() };
+                            return match scope {
+                                SearchScope::Apps => self.act(Action::DataAppOpen(first), now),
+                                _ => self.act(Action::ModuleOpen(first), now),
+                            };
+                        }
                     }
                 }
                 Screen::Decrypt if self.state.code.is_empty() => self.say(l.pick(["请输入锁屏密码", "請輸入螢幕鎖定密碼", "Enter the screen lock"]), now),

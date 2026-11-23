@@ -37,6 +37,8 @@ mod act;
 mod avb;
 mod backup;
 mod charging;
+mod dataapp;
+mod dataapp_list;
 mod decrypt;
 mod draw;
 mod entry;
@@ -149,6 +151,9 @@ pub enum Screen {
     Avb,
     Modules,
     ModuleInfo,
+    DataApps,
+    SystemApps,
+    DataAppInfo,
     /// One of them: what it holds, and what to do to it, with a swipe to
     /// do it.
     Filesystem,
@@ -257,6 +262,8 @@ pub enum Confirm {
     /// Turning the phone off, and what is still going that turning it off
     /// would cut short.
     PowerOff,
+    /// Take the app the data app page shows off the phone.
+    DeleteApp,
 }
 
 /// What a control does when touched.
@@ -464,6 +471,14 @@ pub enum Action {
     SearchModules,
     /// Install the file the file page shows as a module.
     InstallAsModule,
+    /// Open the app at this place in the apps page's list.
+    DataAppOpen(usize),
+    /// Turn to this page of the apps list.
+    AppPage(usize),
+    /// Turn to this page of the system apps list.
+    SysPage(usize),
+    /// Search the apps.
+    SearchApps,
     /// A control whose work is not wired up yet; touching it says so.
     Unavailable(&'static str),
 }
@@ -731,6 +746,12 @@ pub enum Effect {
     ModuleRemove(String, bool),
     /// Install a zip as a module, telling the page with [`App::set_modules`].
     ModuleInstall(String),
+    /// Read the apps the owner installed.
+    ReadDataApps,
+    /// Read the apps the system's own partitions hold.
+    ReadSystemApps,
+    /// Take an app off the phone by its package and its folder.
+    DataAppRemove(String, String),
 }
 
 /// How far the lock's knob has to be dragged for the page behind it to show.

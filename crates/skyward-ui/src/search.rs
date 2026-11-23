@@ -73,6 +73,12 @@ pub const ENTRIES: &[Entry] = &[
         &["renwu", "rw", "task", "tasks", "jindu", "jd", "progress"],
     ),
     entry(
+        ["应用", "應用程式", "Apps"],
+        ADVANCED,
+        Screen::DataApps,
+        &["yingyong", "yy", "app", "apps", "anzhuang", "package"],
+    ),
+    entry(
         ["模块", "模組", "Modules"],
         ADVANCED,
         Screen::Modules,
