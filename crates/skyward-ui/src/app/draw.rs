@@ -195,7 +195,7 @@ impl App {
     /// answered nowhere while these differed). It is shorter than the page is
     /// wide, and centred: a control the whole width of the screen reads as a
     /// bar rather than something to slide.
-    fn lock_track(&self) -> Rect {
+    pub(super) fn lock_track(&self) -> Rect {
         let m = &self.theme().m;
         let wide = (m.w as f32 - m.margin * 2.0).min(m.dp(260.0));
         Rect::new((m.w as f32 - wide) / 2.0, m.h as f32 - m.dp(176.0), wide, m.dp(56.0))
@@ -210,11 +210,11 @@ impl App {
         out.fill_rect(0.0, 0.0, w, h, Rgba::rgb(6, 6, 8).with_alpha(226));
         // The date under which the time stands, as a phone's lock screen shows.
         if let Ok(face) = f.face(400.0)
-            && !self.state.date.is_empty()
+            && !self.date.is_empty()
         {
             let px = m.dp(20.0);
-            let width = out.text_width(&face, &self.state.date, px);
-            out.text(&face, &self.state.date, (w - width) / 2.0, h * 0.245, px, Rgba::rgb(158, 162, 172), None);
+            let width = out.text_width(&face, &self.date, px);
+            out.text(&face, &self.date, (w - width) / 2.0, h * 0.245, px, Rgba::rgb(158, 162, 172), None);
         }
         if let Ok(face) = f.face(600.0) {
             let px = m.dp(64.0);
