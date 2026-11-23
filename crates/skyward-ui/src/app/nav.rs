@@ -288,7 +288,7 @@ impl App {
             // taking rather than what it was taking when last looked at.
             Screen::Charge => vec![Effect::ChargeWatch],
             Screen::Mount => vec![Effect::ReadMounts],
-            Screen::Filesystems => vec![Effect::ReadFilesystems],
+            Screen::Filesystems | Screen::Partitions => vec![Effect::ReadFilesystems],
             Screen::Slot | Screen::Reboot => vec![Effect::ReadSlots],
             Screen::Systems => vec![Effect::ReadSystems],
             Screen::Restore => vec![self.find_backups()],

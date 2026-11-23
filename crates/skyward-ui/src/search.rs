@@ -53,6 +53,12 @@ pub const ENTRIES: &[Entry] = &[
         &["xiufuselinuxshangxiawen", "xfsxw", "xiufu", "xf", "shangxiawen", "context", "restorecon", "label"],
     ),
     entry(
+        ["分区管理", "分割區管理", "Partitions"],
+        ADVANCED,
+        Screen::Partitions,
+        &["fenquguanli", "fqgl", "fenqu", "fq", "biao", "partition", "partitions", "size", "daxiao"],
+    ),
+    entry(
         ["文件系统", "檔案系統", "Filesystems"],
         ADVANCED,
         Screen::Filesystems,

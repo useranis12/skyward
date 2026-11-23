@@ -137,6 +137,7 @@ pub enum Screen {
     /// The partitions whose filesystems can be repaired or made afresh as
     /// another.
     Filesystems,
+    Partitions,
     /// One of them: what it holds, and what to do to it, with a swipe to
     /// do it.
     Filesystem,
