@@ -17,6 +17,7 @@ pub mod motion;
 pub mod pages;
 pub mod progress;
 pub mod search;
+pub mod secure;
 pub mod settings;
 pub mod sprite;
 pub mod surface;
