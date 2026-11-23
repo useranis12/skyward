@@ -3580,9 +3580,7 @@ pub fn files_otg(cx: &Ctx) -> Frame {
         l.pick(["U 盘为空", "USB 隨身碟是空的", "The drive is empty"]),
         Action::OpenOtgEntry,
         top,
-        None,
-        None,
-        Some((l.pick(["内部存储", "內部儲存空間", "Internal storage"]), Action::Open(Screen::Files))),
+        false,
     );
     Frame { dock, ..frame }
 }
