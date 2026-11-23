@@ -41,12 +41,12 @@ pub(super) fn info() -> DeviceInfo {
 /// Take the lock off, so that the page behind it can be worked. The tests
 /// work pages; the knob's drag has its own tests.
 pub(super) fn unlock(app: &mut App, _f: &Fonts, _now: u64) {
-    if !app.locked {
+    if app.lock.is_none() {
         return;
     }
-    app.locked = false;
-    app.unlock = 0.0;
-    app.unlock_back = None;
+    app.lock = None;
+    app.lock_rect = None;
+    app.state.confirm = 0.0;
     app.drag = Drag::Idle;
     app.dirty = true;
 }

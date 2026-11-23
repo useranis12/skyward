@@ -285,7 +285,7 @@ impl App {
     pub fn set_date(&mut self, date: String) {
         if self.date != date {
             self.date = date;
-            if self.locked {
+            if self.lock.is_some() {
                 self.dirty = true;
             }
         }

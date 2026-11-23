@@ -155,6 +155,7 @@ pub fn confirm_label(which: Confirm, s: &State) -> (&'static str, bool) {
         Confirm::ImportImage(_) => (["滑动以写回镜像", "滑動以寫回映像檔", "Slide to write it back"], true),
         Confirm::DeleteImage(_) => (["滑动以删除", "滑動以刪除", "Slide to delete"], true),
             Confirm::DeleteApp => (["滑动以卸载", "滑動以卸載", "Slide to uninstall"], true),
+            Confirm::Unlock => (["滑动解锁", "滑動解鎖", "Slide to unlock"], false),
         Confirm::PowerOff => (["滑动以关机", "滑動以關機", "Slide to power off"], true),
     };
     (s.lang.pick(label), danger)

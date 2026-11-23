@@ -1127,6 +1127,12 @@ impl App {
                     self.refresh();
                 }
             }
+            // The lock was slid away: it is gone, and the page is back under
+            // the finger.
+            Confirm::Unlock => {
+                self.lock = None;
+                self.refresh();
+            }
             Confirm::DeleteApp => {
                 if let Some(at) = self.state.app_at
                     && let Some(Ok(list)) = &self.state.apps

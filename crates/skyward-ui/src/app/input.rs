@@ -10,9 +10,9 @@ impl App {
         if !self.display_on {
             return Vec::new();
         }
-        // The lock that the panel woke to takes every finger: only its knob
-        // moves, and the page is uncovered when the knob reaches the end.
-        if self.locked {
+        // While the lock shows, only its knob answers: nothing a touch meant
+        // for the page behind it reaches it.
+        if self.lock.is_some() {
             return self.lock_touch(ev, now);
         }
         // A finger on the charging screen sends it away for the page, and
@@ -205,8 +205,6 @@ impl App {
                 }
                 Drag::Waking => self.drag = Drag::Waking,
                 Drag::Held => self.drag = Drag::Held,
-                // The lock's knob is dragged by its own handler.
-                Drag::Lock { .. } => self.drag = Drag::Idle,
                 Drag::Idle => {}
             },
             Touch::Up => match std::mem::replace(&mut self.drag, Drag::Idle) {
@@ -323,58 +321,52 @@ impl App {
     /// No touchscreen answers: the keys work the pages, their light shown
     /// from now on.
     /// A finger on the lock: dragging the knob moves it, letting go past
-    /// `UNLOCKED` uncovers the page, and anything else springs back.
+    /// `UNLOCK_AT` uncovers the page, and anything else springs back.
     ///
     /// The finger has to come down on the knob itself: a touch anywhere else
     /// on the lock reaches nothing, so that a hand brushing the panel does not
     /// take the page up.
     fn lock_touch(&mut self, ev: Touch, now: u64) -> Vec<Effect> {
+        let track = self.lock_rect.unwrap_or_else(|| self.lock_track());
         match ev {
             Touch::Down(x, y) => {
-                // The knob's track is where the lock draws it; a lock not yet
-                // drawn still takes a finger there. It is shorter than the page
-                // is wide and centred, as the lock draws it.
-                let track = self.lock_track.unwrap_or_else(|| {
-                    let m = self.theme().m;
-                    let wide = (m.w as f32 - m.margin * 2.0).min(m.dp(260.0));
-                    Rect::new((m.w as f32 - wide) / 2.0, m.h as f32 - m.dp(176.0), wide, m.dp(56.0))
-                });
-                {
-                    // Where the knob is now, which is what the finger has to
-                    // land on rather than the whole track.
-                    let knob = track.x + (track.w - track.h) * self.unlock;
-                    let r = track.h / 2.0;
-                    let on = (x - (knob + r)).abs() <= r && (y - (track.y + r)).abs() <= r;
-                    if on {
-                        self.drag = Drag::Lock { track, grab: x - knob };
-                    }
+                let on_knob = x >= track.x && x <= track.x + track.w && y >= track.y && y <= track.y + track.h;
+                if let Some(lock) = &mut self.lock {
+                    lock.held = on_knob;
                 }
             }
             Touch::Move(x, _) => {
-                if let Drag::Lock { track, grab } = self.drag {
-                    let travel = (track.w - track.h).max(1.0);
-                    let along = ((x - grab - track.x) / travel).clamp(0.0, 1.0);
-                    if (along - self.unlock).abs() > f32::EPSILON {
-                        self.unlock = along;
-                        self.dirty = true;
-                    }
+                let span = (track.w - track.h).max(1.0);
+                if let Some(lock) = &mut self.lock
+                    && lock.held
+                {
+                    lock.drag = ((x - (track.x + track.h / 2.0)) / span).clamp(0.0, 1.0);
+                    self.dirty = true;
                 }
             }
             Touch::Up => {
-                if matches!(self.drag, Drag::Lock { .. }) {
-                    self.drag = Drag::Idle;
-                    if self.unlock >= UNLOCKED {
-                        self.locked = false;
-                        self.unlock = 0.0;
-                    } else if self.unlock > 0.0 {
-                        // Short of the end: the knob eases back from where the
-                        // hand left it, so that it is seen to move.
-                        self.unlock_back = Some((now, self.unlock));
+                let unlocked = self.lock.as_ref().is_some_and(|l| l.held && l.drag >= UNLOCK_AT);
+                if let Some(lock) = &mut self.lock {
+                    lock.held = false;
+                    if !unlocked {
+                        lock.drag = 0.0;
                     }
+                }
+                if unlocked {
+                    self.lock = None;
+                    self.state.confirm = 0.0;
+                    self.lock_rect = None;
+                    self.refresh();
+                    // The lock gave way: the same click a slider gives.
+                    if self.state.vibrate {
+                        return vec![Effect::Haptic];
+                    }
+                } else {
                     self.dirty = true;
                 }
             }
         }
+        let _ = now;
         Vec::new()
     }
 

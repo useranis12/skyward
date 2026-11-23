@@ -265,6 +265,9 @@ pub enum Confirm {
     PowerOff,
     /// Take the app the data app page shows off the phone.
     DeleteApp,
+    /// Slide the lock away from over the page, its knob taken along its track
+    /// as a finger takes it: what the power key works while the lock shows.
+    Unlock,
 }
 
 /// What a control does when touched.
@@ -761,10 +764,8 @@ pub enum Effect {
     DataAppRemove(String, String),
 }
 
-/// How far the lock's knob has to be dragged for the page behind it to show.
-const UNLOCKED: f32 = 0.96;
-/// How long the lock's knob takes to ease back when a hand lets it go short.
-const UNLOCK_BACK_MS: u64 = 220;
+/// How much of the track the knob must reach for the lock to give way.
+const UNLOCK_AT: f32 = 0.96;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 enum Drag {
@@ -785,9 +786,6 @@ enum Drag {
     Edge { start: f32, from_left: bool, armed: bool, x: f32, cy: f32 },
     Slider(Slider, Rect),
     Confirm { which: Confirm, track: Rect, grab: f32 },
-    /// Dragging the lock's knob: where its track is, and how far from the
-    /// knob the finger came down.
-    Lock { track: Rect, grab: f32 },
     /// Scrolling a terminal's screen back through what the shell wrote, or
     /// the editor's text, `carry` being the part of a row not yet scrolled.
     History { last: f32, carry: f32, pitch: f32 },
@@ -1232,6 +1230,13 @@ fn keyboard_strip(t: &Theme, frame: &Frame) -> (Canvas, i32) {
     (strip, top)
 }
 
+/// What a locked screen holds: how far the knob has been slid along.
+struct Lock {
+    drag: f32,
+    /// Whether the finger went down on the knob rather than elsewhere.
+    held: bool,
+}
+
 pub struct App {
     pub state: State,
     /// The order the file manager was put in, to be written down once.
@@ -1316,16 +1321,17 @@ pub struct App {
     /// The terminal page's shell, from when it is first opened; it goes on
     /// while other pages show.
     term: Option<Term>,
-    /// Whether the panel woke to a lock over the page, how far its knob has
-    /// been dragged, and where that knob was last drawn.
-    locked: bool,
-    unlock: f32,
-    lock_track: Option<Rect>,
+    /// The lock over the page once the panel went dark, until its knob is slid
+    /// along.
+    lock: Option<Lock>,
+    /// Whether the lock was what the panel showed when it began to go dark: the
+    /// frames of the fade keep it drawn, since the page under it is not what
+    /// was on the screen.
+    lock_shown: bool,
+    /// Where the lock's knob was last drawn, which is where a finger finds it.
+    lock_rect: Option<Rect>,
     /// The date the lock shows, as the system keeps it.
     date: String,
-    /// When a hand let the lock's knob go short of the end, and where it was
-    /// then: the knob eases back from there over [`UNLOCK_BACK_MS`].
-    unlock_back: Option<(u64, f32)>,
     display_on: bool,
     /// When the screen was last touched or a key pressed; set on the first
     /// tick, so the time before the UI started does not count.
@@ -1426,11 +1432,10 @@ impl App {
             snap: false,
             glow: None,
             term: None,
-            locked: false,
-            unlock: 0.0,
-            lock_track: None,
+            lock: None,
+            lock_shown: false,
+            lock_rect: None,
             date: String::new(),
-            unlock_back: None,
             display_on: true,
             active: None,
             woke_at: None,

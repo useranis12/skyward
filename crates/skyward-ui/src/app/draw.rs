@@ -172,28 +172,49 @@ impl App {
         if charge > 0.0 {
             self.compose_charging(out, f, info, charge, now);
         }
-        out.dim(self.curtain.level(now));
-        if self.locked {
-            self.compose_lock(out, f, info, clock, now);
+        // The page comes up from black as the panel lights, and goes dark as
+        // it goes off. The lock is drawn while the panel is lit, and through
+        // the fade if the lock was what the panel was showing when it began to
+        // go dark: the page under it is not what was on the screen, and showing
+        // it for the moment the backlight takes to close reads as an unlock.
+        let shown = self.display_on || self.lock_shown;
+        if shown
+            && let Some(lock) = &self.lock
+        {
+            let drag = lock.drag;
+            self.compose_lock(out, f, info, clock, drag);
         }
+        out.dim(self.curtain.level(now));
     }
 
-    /// The lock the panel woke to: the date over the time, what the battery
-    /// holds and what it is taking under that, and the knob at the foot.
+    /// Where the lock's knob is: the rect it is drawn in, which is the rect a
+    /// finger has to land on.
     ///
-    /// The figures stand at fractions of the panel's height rather than at
-    /// fixed offsets, so that the time keeps its place on a phone whose panel
-    /// is not the one these were measured on.
-    fn compose_lock(&mut self, out: &mut Canvas, f: &Fonts, info: &DeviceInfo, clock: &str, now: u64) {
+    /// The rect the confirm control draws is the one a finger has to land on:
+    /// its margins and height, not an inset of our own (2026-11-15, the knob
+    /// answered nowhere while these differed). It is shorter than the page is
+    /// wide, and centred: a control the whole width of the screen reads as a
+    /// bar rather than something to slide.
+    fn lock_track(&self) -> Rect {
+        let m = &self.theme().m;
+        let wide = (m.w as f32 - m.margin * 2.0).min(m.dp(260.0));
+        Rect::new((m.w as f32 - wide) / 2.0, m.h as f32 - m.dp(176.0), wide, m.dp(56.0))
+    }
+
+    /// The lock over the page: the phone's time, its battery, and the knob to
+    /// slide along.
+    fn compose_lock(&mut self, out: &mut Canvas, f: &Fonts, info: &DeviceInfo, clock: &str, drag: f32) {
         let t = self.theme();
         let m = &t.m;
         let (w, h) = (m.w as f32, m.h as f32);
         out.fill_rect(0.0, 0.0, w, h, Rgba::rgb(6, 6, 8).with_alpha(226));
         // The date under which the time stands, as a phone's lock screen shows.
-        if !self.date.is_empty() {
+        if let Ok(face) = f.face(400.0)
+            && !self.state.date.is_empty()
+        {
             let px = m.dp(20.0);
-            let width = out.text_width(&f.body, &self.date, px);
-            out.text(&f.body, &self.date, (w - width) / 2.0, h * 0.245, px, Rgba::rgb(158, 162, 172), None);
+            let width = out.text_width(&face, &self.state.date, px);
+            out.text(&face, &self.state.date, (w - width) / 2.0, h * 0.245, px, Rgba::rgb(158, 162, 172), None);
         }
         if let Ok(face) = f.face(600.0) {
             let px = m.dp(64.0);
@@ -201,42 +222,29 @@ impl App {
             let width = out.text_width(&face, clock, px);
             out.text(&face, clock, (w - width) / 2.0, baseline, px, Rgba::rgb(236, 238, 242), None);
         }
-        if let Some(b) = info.battery.as_ref() {
+        if let (Ok(face), Some(b)) = (f.face(400.0), info.battery.as_ref()) {
             // The level is always said, and while a cable is in, what it is
-            // taking: 85% · 充电中 · 18W.
+            // taking: 85% \u00b7 charging \u00b7 18W.
             let percent = format!("{}%", b.level);
-            let charging = self.state.lang.pick(["充电中", "充電中", "Charging"]);
             let note = match b.plugged {
                 true => match b.watts() {
-                    Some(watts) => format!("{percent} · {charging} · {watts:.0}W"),
-                    None => format!("{percent} · {charging}"),
+                    Some(watts) => format!("{percent} \u00b7 {} \u00b7 {watts:.0}W", self.state.lang.pick(["\u5145\u7535\u4e2d", "\u5145\u96fb\u4e2d", "Charging"])),
+                    None => format!("{percent} \u00b7 {}", self.state.lang.pick(["\u5145\u7535\u4e2d", "\u5145\u96fb\u4e2d", "Charging"])),
                 },
                 false => match b.watts() {
-                    Some(watts) => format!("{percent} · {watts:.0}W"),
+                    Some(watts) => format!("{percent} \u00b7 {watts:.0}W"),
                     None => percent,
                 },
             };
             let px = m.dp(18.0);
-            let width = out.text_width(&f.body, &note, px);
-            out.text(&f.body, &note, (w - width) / 2.0, h * 0.375, px, Rgba::rgb(150, 154, 164), None);
+            let width = out.text_width(&face, &note, px);
+            out.text(&face, &note, (w - width) / 2.0, h * 0.375, px, Rgba::rgb(150, 154, 164), None);
         }
-        // The knob at the foot, easing back when a hand lets it go short. Its
-        // track is shorter than the page is wide and centred: a control the
-        // whole width of the screen reads as a bar rather than something to
-        // slide.
-        let along = match self.unlock_back {
-            Some((at, from)) => {
-                let gone = (now.saturating_sub(at) as f32 / UNLOCK_BACK_MS as f32).clamp(0.0, 1.0);
-                from * (1.0 - gone) * (1.0 - gone)
-            }
-            None => self.unlock,
-        };
-        let label = self.state.lang.pick(["滑动解锁", "滑動解鎖", "Slide to unlock"]);
-        let wide = (w - m.margin * 2.0).min(m.dp(260.0));
-        let track = Rect::new((w - wide) / 2.0, h - m.dp(176.0), wide, m.dp(56.0));
-        // Drawn in the rect the finger has to land on, not one inset from it:
-        // the knob answered nowhere while these differed.
-        self.lock_track = Some(widgets::confirm_in(out, &t, f, track, label, false, along));
+        let track = self.lock_track();
+        let (label, _) = crate::pages::confirm_label(Confirm::Unlock, &self.state);
+        // Drawn in the rect `lock_track` gives, which is also where the finger
+        // has to land: a control across the whole page is a bar, not a slide.
+        self.lock_rect = Some(widgets::confirm_in(out, &t, f, track, label, false, drag));
     }
 
     /// The charging screen, `level` of the way over the page drawn on `out`.

@@ -33,12 +33,17 @@ impl App {
             self.display_on = true;
             self.dirty = true;
             self.darkening = None;
+            // Lit is `display_on`'s to say; `lock_shown` belongs only to the
+            // stretch while the panel is going dark.
+            self.lock_shown = false;
             self.curtain.set(true, now);
-            // The panel wakes to a lock, as the phone's own system does: the
-            // page behind it shows again once the knob is dragged across.
-            self.locked = true;
-            self.unlock = 0.0;
-            self.lock_track = None;
+            // The lock shows with this wake, so the knob starts over.
+            if let Some(lock) = &mut self.lock {
+                lock.drag = 0.0;
+                lock.held = false;
+            }
+            self.state.confirm = 0.0;
+            self.lock_rect = None;
         }
         self.woke_at = Some(now);
         self.stir(now);
@@ -99,6 +104,24 @@ impl App {
     /// now, then the panel goes off. A finger on the glass lets go of what
     /// it held, and the page stops where it is.
     pub(super) fn sleep(&mut self, now: u64) {
+        // What the panel was showing when it began to go dark has to be
+        // remembered: the frames of the fade keep drawing the lock, or the page
+        // under it shows for a moment — which reads as an unlock. Already dark,
+        // there is nothing to remember: those frames go on drawing what the
+        // last one did.
+        if self.display_on {
+            self.lock_shown = self.lock.is_some();
+        }
+        // The panel goes dark over the page it shows, and the lock is there for
+        // the wake that comes next. The fastboot page takes no lock: it is
+        // worked with the keys, since the touchscreen runs from the partitions
+        // fastbootd leaves out, and a knob no panel could slide would hold the
+        // page shut for good.
+        if self.screen() != Screen::Fastboot {
+            self.lock = Some(Lock { drag: 0.0, held: false });
+        }
+        self.state.confirm = 0.0;
+        self.lock_rect = None;
         self.darkening = self.panel(now);
         self.curtain.set(false, now);
         self.display_on = false;
