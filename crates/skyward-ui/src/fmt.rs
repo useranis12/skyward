@@ -139,6 +139,28 @@ pub fn volts(uv: u64) -> String {
     format!("{:.2}V", uv as f64 / 1e6)
 }
 
+/// A current given in microamps, in the unit that reads best: whole amps
+/// where it is whole, hundredths of an amp down to a tenth, and milliamps
+/// below that, so a small draw never shows as a round zero.
+pub fn amps(ua: u64) -> String {
+    if ua < 1_000_000 {
+        return format!("{}mA", (ua as f64 / 1e3).round() as u64);
+    }
+    match ua % 1_000_000 {
+        0 => format!("{}A", ua / 1_000_000),
+        _ => format!("{:.2}A", ua as f64 / 1e6),
+    }
+}
+
+/// A power given in tenths of a watt, to the tenth where it is not whole:
+/// `18`, `6.2`, `100`.
+pub fn watts(tenths: u32) -> String {
+    match tenths % 10 {
+        0 => format!("{}W", tenths / 10),
+        _ => format!("{:.1}W", tenths as f64 / 10.0),
+    }
+}
+
 /// The kernel's battery health in the language; a state it does not list
 /// shows as reported.
 pub fn health(l: Lang, h: &str) -> String {

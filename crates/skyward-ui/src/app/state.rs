@@ -2,6 +2,89 @@
 
 use super::*;
 
+/// The warmest and coolest the charge may be let to warm the battery to, in
+/// whole degrees Celsius, and where the slider starts.
+pub const THERMAL_LIMIT_LEAST: u8 = 40;
+pub const THERMAL_LIMIT_MOST: u8 = 55;
+pub const THERMAL_LIMIT_DEFAULT: u8 = 45;
+
+/// How fast the phone is let to charge, as the charge page offers it: three
+/// steps, each the programs the recovery starts for it, since it is the
+/// phone's own programs that tell the kernel what a charge may draw and
+/// whether the charger may be verified.
+///
+/// A step reaches the phone at the next start of the recovery, not at once:
+/// the programs are started once, as the recovery comes up, and what the
+/// secret keeper tells the kernel of a charge cannot be taken back while the
+/// cable is in — so ending it later leaves the charge as fast as it would
+/// have been, and starting it later would have nothing to say until the phone
+/// was started again anyway. The page says so, since a step that looked as if
+/// it had taken at once would have the page saying one thing and the phone
+/// doing another.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ChargeMode {
+    /// Neither program: the kernel holds the charge at the ceiling it sets
+    /// for a battery it has not been told passed its check.
+    #[default]
+    Plain,
+    /// Xiaomi's charging service, which passes on the battery's check: the
+    /// ceiling lifts, and the charge draws what a plain power delivery
+    /// connection gives.
+    Fast,
+    /// That service and Xiaomi's secret keeper, which has the charger
+    /// verified: the protocol goes on to the adjustable kind, and the charge
+    /// draws what the charger can give.
+    Fastest,
+}
+
+impl ChargeMode {
+    /// The steps, in the order the page offers them.
+    pub const ALL: [ChargeMode; 3] = [ChargeMode::Plain, ChargeMode::Fast, ChargeMode::Fastest];
+
+    /// The name it is kept by in the settings file, so a later version that
+    /// lists the steps otherwise reads it the same.
+    pub fn name(self) -> &'static str {
+        match self {
+            ChargeMode::Plain => "plain",
+            ChargeMode::Fast => "fast",
+            ChargeMode::Fastest => "fastest",
+        }
+    }
+
+    /// The step a settings file names, where it names one this version has.
+    pub fn named(name: &str) -> Option<ChargeMode> {
+        ChargeMode::ALL.into_iter().find(|mode| mode.name() == name)
+    }
+
+    /// Whether Xiaomi's charging service is started for it.
+    pub fn charging_service(self) -> bool {
+        matches!(self, ChargeMode::Fast | ChargeMode::Fastest)
+    }
+
+    /// Whether Xiaomi's secret keeper is started for it.
+    pub fn secret_keeper(self) -> bool {
+        matches!(self, ChargeMode::Fastest)
+    }
+
+    /// The step below this one, where there is one: what the thermal guard
+    /// chooses when the battery gets too warm.
+    pub fn stepped_down(self) -> Option<ChargeMode> {
+        match self {
+            ChargeMode::Plain => None,
+            ChargeMode::Fast => Some(ChargeMode::Plain),
+            ChargeMode::Fastest => Some(ChargeMode::Fast),
+        }
+    }
+
+    /// Whether a charge at this step is fast enough for its warmth to be
+    /// worth watching: the plain step starts neither of Xiaomi's programs,
+    /// and what it draws cannot warm the battery enough to matter, so the
+    /// thermal guard is neither offered nor obeyed there.
+    pub fn guarded(self) -> bool {
+        !matches!(self, ChargeMode::Plain)
+    }
+}
+
 /// Choices the pages show and the user changes, and where installing
 /// stands.
 #[derive(Clone, Debug, PartialEq)]
@@ -210,6 +293,28 @@ pub struct State {
     pub skyward_job: Option<SkywardJob>,
     /// How fast data went over the network joined in the last second.
     pub traffic: Traffic,
+    /// What the runtime last read from the charger: the power it delivers,
+    /// the protocol it negotiated, and the most it has given this charge.
+    pub charge: ChargeNow,
+    /// The battery's temperature in tenths of a degree, as the charge page
+    /// last read it, which the battery card shows.
+    pub battery_temp: Option<i32>,
+    /// Whether the kernel's own node says the battery passed its check, which
+    /// is what decides the current the charge may draw.
+    pub fast_charge_kernel: bool,
+    /// How fast the phone is let to charge, as the page offers it. The
+    /// programs that settle it are started as the recovery comes up, so the
+    /// step reaches the phone at the next start.
+    pub charge_mode: ChargeMode,
+    /// Whether the charge is stepped down when the battery gets too warm, and
+    /// how warm is too warm in whole degrees Celsius.
+    ///
+    /// A step only counts above the plain one: the plain step starts neither
+    /// of Xiaomi's programs, and what a charge draws there cannot warm the
+    /// battery enough to be worth watching, so the guard is neither offered
+    /// nor obeyed there.
+    pub thermal_guard: bool,
+    pub thermal_limit: u8,
 }
 
 impl Default for State {
@@ -309,6 +414,12 @@ impl Default for State {
             skyward_check: SkywardCheck::Idle,
             skyward_job: None,
             traffic: Traffic::default(),
+            charge: ChargeNow::default(),
+            battery_temp: None,
+            fast_charge_kernel: false,
+            charge_mode: ChargeMode::default(),
+            thermal_guard: true,
+            thermal_limit: THERMAL_LIMIT_DEFAULT,
         }
     }
 }

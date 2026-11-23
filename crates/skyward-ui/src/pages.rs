@@ -1,9 +1,9 @@
 use crate::app::{
-    Action, BackupAt, BackupEnd, BackupJob, Check, ClashChoice, Confirm, Damage, Data, Dock, DownloadEnd, EraseStop, Field, FileKind,
-    FileOp, FileTask, Fetch, Fold, Folder, Frame, FsAction, FsChoice, FsRow, Have, HeroArt, Hit, Install, JobEnd, Keys, Pick, Place, Rows, Screen,
-    Serving, SkywardCheck, SkywardEnd, SkywardJob, SkywardStage, Slider, Source, State, Switch, SystemsWork, Target, UsbDrive, UsbLink, Wipe, ADDABLE,
-    BACKUP_PARTS, DATA_ERASED, DATA_PARTITION, DOWNLOADS, FASTBOOT_CHOICES, SCREEN_OFF, TARGETS, TIME_ZONES, USB_DRIVE_UNREADABLE,
-    USB_DRIVE_WANTED, WIPES, installs, starting,
+    Action, BackupAt, BackupEnd, BackupJob, Check, ChargeMode, ClashChoice, Confirm, Damage, Data, Dock, DownloadEnd, EraseStop, Field,
+    FileKind, FileOp, FileTask, Fetch, Fold, Folder, Frame, FsAction, FsChoice, FsRow, Have, HeroArt, Hit, Install, JobEnd, Keys, Pick,
+    Place, Rows, Screen, Serving, SkywardCheck, SkywardEnd, SkywardJob, SkywardStage, Slider, Source, State, Switch, SystemsWork, Target,
+    UsbDrive, UsbLink, Wipe, ADDABLE, BACKUP_PARTS, DATA_ERASED, DATA_PARTITION, DOWNLOADS, FASTBOOT_CHOICES, SCREEN_OFF, TARGETS,
+    THERMAL_LIMIT_LEAST, THERMAL_LIMIT_MOST, TIME_ZONES, USB_DRIVE_UNREADABLE, USB_DRIVE_WANTED, WIPES, installs, starting,
 };
 use crate::canvas::Canvas;
 use crate::color::Rgba;
@@ -98,6 +98,7 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::SkywardUpdate => skyward_update(cx),
         Screen::License => license(cx),
         Screen::FontLicense => font_license(cx),
+        Screen::Charge => charge(cx),
         Screen::Slot => slot(cx),
         Screen::Systems => systems(cx),
         Screen::Fastboot => fastboot(cx),
@@ -293,6 +294,16 @@ pub fn home(cx: &Ctx) -> Frame {
         Row::new(l.pick(["恢复", "還原", "Restore"])).icon(PURPLE, Icon::Restore),
         Row::new(l.pick(["挂载", "掛載", "Mount"])).icon(SLATE, Icon::Mount),
         Row::new(l.pick(DECRYPT)).icon(BLUE, Icon::Lock).trail(Trail::Value(fmt::data(l, &cx.state.data))),
+        // Charging sits above the advanced tools: it is used more often than
+        // what is inside them, and should not be hidden there. While a
+        // charger is attached the row shows the power it delivers, which is
+        // the same figure the charge page shows.
+        match &cx.info.battery {
+            Some(b) if b.plugged => Row::new(l.pick(CHARGE))
+                .icon(GREEN, Icon::Battery)
+                .trail(Trail::Value(cx.state.charge.now.map_or_else(|| l.pick(["充电中", "充電中", "Charging"]).to_owned(), fmt::watts))),
+            _ => Row::new(l.pick(CHARGE)).icon(SLATE, Icon::Battery),
+        },
     ]);
     out.extend(hits(&tools.rows, &[
         Action::Open(Screen::Install),
@@ -300,6 +311,7 @@ pub fn home(cx: &Ctx) -> Frame {
         Action::Open(Screen::Restore),
         Action::Open(Screen::Mount),
         Action::Open(Screen::Decrypt),
+        Action::Open(Screen::Charge),
     ]));
     y = tools.bottom + t.m.card_gap;
     let target = l.pick(REBOOT_TARGETS[cx.state.reboot].0);
@@ -3898,6 +3910,226 @@ pub fn font_license(cx: &Ctx) -> Frame {
 }
 
 const BOOT_SLOT: Text = ["启动槽位", "啟動槽位", "Boot slot"];
+
+const CHARGE: Text = ["充电设置", "充電設定", "Charging"];
+
+/// What the charger is doing: the power it delivers, the protocol it
+/// negotiated, and the battery it fills.
+///
+/// This page reads and does not set. On this phone the nodes that would hold
+/// a charge limit are policy votes rather than figures, and a number written
+/// to them is refused, so the recovery cannot change how fast the phone
+/// charges — the kernel and the charger settle that between them before the
+/// page is ever drawn. What the page can do is say what they settled on,
+/// which is what a recovery is asked for when a charge looks slow.
+pub fn charge(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let mut c = long_page(cx);
+    let mut out = Vec::new();
+    let top = t.m.content_top;
+    let ch = &s.charge;
+    let b = cx.info.battery.as_ref();
+
+    // What the charger is giving, and the most it has given this charge: the
+    // two numbers that say how fast this charge is running.
+    let now = match ch.now {
+        Some(tenths) => fmt::watts(tenths),
+        None if b.is_some_and(|b| b.plugged) => l.pick(["读取中", "讀取中", "Reading"]).to_owned(),
+        None => l.pick(["未接充电器", "未接充電器", "No charger"]).to_owned(),
+    };
+    let most = match ch.most {
+        Some(tenths) => fmt::watts(tenths),
+        None => "\u{2014}".to_owned(),
+    };
+    let y = widgets::section_first(&mut c, t, f, top, l.pick(["现在", "現在", "Now"]));
+    let rows = [Row::new(&now).icon(BLUE, Icon::Battery).trail(Trail::Value(&most))];
+    let list = widgets::list(&mut c, t, f, y, &rows);
+    let mut y = list.bottom;
+
+    // How fast the phone is let to charge, chosen before the charger and the
+    // battery are told of: it is the one thing on this page that changes what
+    // the phone does rather than what it says. The programs that settle it are
+    // started as the recovery starts, so a step chosen here reaches the phone
+    // at the next start, and the page says so rather than letting the steps
+    // look as if they had taken at once.
+    {
+        let steps: [(ChargeMode, Text, Text); 3] = [
+            (
+                ChargeMode::Plain,
+                ["默认", "預設", "Default"],
+                [
+                    "不启动充电服务，内核把电流限在它给未认证电池的上限，5W+。",
+                    "不啟動充電服務，核心把電流限在它給未認證電池的上限，5W+。",
+                    "Neither service runs, so the kernel holds the current at the ceiling it sets an unchecked battery: 5W+.",
+                ],
+            ),
+            (
+                ChargeMode::Fast,
+                ["快充", "快充", "Fast"],
+                [
+                    "启动小米充电服务，内核被告知电池已通过认证，10W+。",
+                    "啟動小米充電服務，核心被告知電池已通過認證，10W+。",
+                    "Xiaomi's charging service runs, so the kernel is told the battery passed its check: 10W+.",
+                ],
+            ),
+            (
+                ChargeMode::Fastest,
+                ["超快充", "超快充", "Fastest"],
+                [
+                    "再启动小米的认证进程，充电器通过校验后可升压到 PPS 档，40W+。",
+                    "再啟動小米的認證行程，充電器通過校驗後可升壓到 PPS 檔，40W+。",
+                    "Xiaomi's secret keeper runs as well, so the charger may be verified and the protocol go on to the adjustable kind: 40W+.",
+                ],
+            ),
+        ];
+        y = widgets::section(&mut c, t, f, y, l.pick(["充电档位", "充電檔位", "Charge step"]));
+        let rows: Vec<Row> = steps
+            .iter()
+            .map(|(mode, name, detail)| Row::new(l.pick(*name)).subtitle(l.pick(*detail)).trail(Trail::Check(s.charge_mode == *mode)))
+            .collect();
+        let list = widgets::list(&mut c, t, f, y, &rows);
+        y = list.bottom;
+        // The step already chosen is not a hit: tapping it would do nothing,
+        // and offering it as something to tap would say otherwise.
+        for (i, (mode, _, _)) in steps.iter().enumerate() {
+            if s.charge_mode != *mode {
+                out.extend(hits(&list.rows[i..=i], &[Action::Toggle(Switch::ChargeStep(*mode))]));
+            }
+        }
+        y = widgets::footnote(
+            &mut c,
+            t,
+            f,
+            y + t.m.dp(8.0),
+            l.pick([
+                "档位在下次开机时生效：它决定 recovery 启动哪些小米服务，而这些服务只在启动时决定一次。",
+                "檔位在下次開機時生效：它決定 recovery 啟動哪些小米服務，而這些服務只在啟動時決定一次。",
+                "A step takes effect the next time the recovery starts: it decides which of Xiaomi's services the recovery starts, and those are decided once, as it starts.",
+            ]),
+        );
+    }
+
+    // The thermal guard, above the charger it watches: how warm the battery
+    // may get before the charge is stepped down, and starting the recovery
+    // again to make the step take. It is neither offered nor obeyed on the
+    // plain step, where nothing a charge draws can warm the battery enough to
+    // matter, so the slider is drawn dimmed and takes no touch.
+    {
+        let guarded = s.charge_mode.guarded();
+        y = widgets::section(&mut c, t, f, y + t.m.dp(8.0), l.pick(["温控", "溫控", "Thermal guard"]));
+        let span = f32::from(THERMAL_LIMIT_MOST - THERMAL_LIMIT_LEAST);
+        let level = (f32::from(s.thermal_limit - THERMAL_LIMIT_LEAST) / span).clamp(0.0, 1.0);
+        // The limit is written into the label, since the card has no value of
+        // its own: the switch below it is the guard itself.
+        let label = format!(
+            "{} · {} °C",
+            l.pick(["电池温度上限", "電池溫度上限", "Battery temperature limit"]),
+            s.thermal_limit
+        );
+        let below = Row::new(l.pick(["超出后降低充电档位", "超出後降低充電檔位", "Step the charge down when past"]))
+            .trail(Trail::Switch(s.thermal_guard && guarded));
+        let card = widgets::slider_card(&mut c, t, f, y + t.m.dp(8.0), Caption::Thermometer, &label, level, Some(below));
+        // The limit is the same number whatever the step, so it is drawn as it
+        // stands even where it cannot be changed: a slider drawn at its left
+        // end would say the limit had been moved there.
+        //
+        // A limit is only worth setting while the guard that reads it is on,
+        // so the slider takes no touch where the switch is off, or where the
+        // step starts nothing the guard has any say over. The switch itself is
+        // still the guard's to turn, wherever a step is guarded at all.
+        let lit = guarded && s.thermal_guard;
+        if !lit {
+            // Laid over the whole card, the way a finger's press is laid over a
+            // row it holds: it says the card takes no touch without hiding what
+            // it holds.
+            let top = y + t.m.dp(8.0);
+            c.fill_round_rect(t.m.margin, top, t.m.w as f32 - t.m.margin * 2.0, card.bottom - top, t.m.card_radius, t.pal.row_press);
+        } else {
+            out.push(Hit { rect: card.track, action: Action::Slider(Slider::ThermalLimit) });
+        }
+        if guarded && let Some(r) = card.below {
+            out.push(Hit { rect: r, action: Action::Toggle(Switch::ThermalGuard) });
+        }
+        y = card.bottom;
+        y = widgets::footnote(
+            &mut c,
+            t,
+            f,
+            y + t.m.dp(8.0),
+            if guarded {
+                l.pick([
+                    "开关和温度都是即时生效的：开启后温度才可调，调完就按新温度盯着，电池一到这个温度就把充电档位降一档，然后重启回 recovery 按新档位充电。默认档不启动任何服务，充电很慢，不会让电池过热，所以默认档下这一项不可调，也不生效。",
+                    "開關和溫度都是即時生效的：開啟後溫度才可調，調完就按新溫度盯著，電池一到這個溫度就把充電檔位降一檔，然後重啟回 recovery 按新檔位充電。預設檔不啟動任何服務，充電很慢，不會讓電池過熱，所以預設檔下這一項不可調，也不生效。",
+                    "The switch and the temperature both take at once: the limit may be set only while the guard is on, and it is watched as it is set, so a battery that reaches it has the charge stepped down there and then, starting the recovery again to charge at the new step. The default step starts no service at all, so its charge is slow enough not to overheat the battery: the guard is neither offered nor obeyed there.",
+                ])
+            } else {
+                l.pick([
+                    "默认档不启动任何服务，充电很慢，不会让电池过热，所以这一项不可调，也不生效。",
+                    "預設檔不啟動任何服務，充電很慢，不會讓電池過熱，所以這一項不可調，也不生效。",
+                    "The default step starts no service at all, so its charge is slow enough not to overheat the battery: this is neither offered nor obeyed there.",
+                ])
+            },
+        );
+    }
+
+    // What the charger negotiated, and what it says it can give. These are
+    // the kernel's own words, left as it writes them: a protocol name is a
+    // name, and translating it would only make it harder to look up.
+    let mut charger: Vec<(&str, String)> = Vec::new();
+    if let Some(protocol) = &ch.protocol {
+        charger.push((l.pick(["协议", "協定", "Protocol"]), protocol.clone()));
+    }
+    if let Some(rated) = ch.rated {
+        charger.push((l.pick(["充电器标称", "充電器標稱", "Charger rated"]), fmt::watts(rated * 10)));
+    }
+    if let Some(uv) = ch.volts {
+        charger.push((l.pick(["输入电压", "輸入電壓", "Input voltage"]), fmt::volts(uv)));
+    }
+    if let Some(ua) = ch.amps {
+        charger.push((l.pick(["输入电流", "輸入電流", "Input current"]), fmt::amps(ua)));
+    }
+    if !charger.is_empty() {
+        y = widgets::section(&mut c, t, f, y, l.pick(["充电器", "充電器", "Charger"]));
+        y = widgets::info_card(&mut c, t, f, y, &charger);
+    }
+
+    // The battery being filled: what it is at, how warm it is, and what the
+    // charge is doing to it. The warmth matters more here than anywhere else
+    // on the pages, since a fast charge is what makes it.
+    if let Some(b) = b {
+        let mut cells = vec![(l.pick(["电量", "電量", "Level"]), fmt::level(l, b))];
+        if let Some(v) = b.temp {
+            cells.push((l.pick(["温度", "溫度", "Temperature"]), fmt::celsius(v)));
+        }
+        if let Some(w) = b.watts() {
+            cells.push((l.pick(["电池功率", "電池功率", "Battery power"]), fmt::watts((w * 10.0).round() as u32)));
+        }
+        if let Some(v) = b.voltage {
+            cells.push((l.pick(["电池电压", "電池電壓", "Battery voltage"]), fmt::volts(v)));
+        }
+        if let Some(v) = fmt::wear(l, b) {
+            cells.push((l.pick(["健康", "健康狀態", "Health"]), v));
+        }
+        if let Some(v) = b.cycles {
+            cells.push((l.pick(["充电循环", "充電循環", "Charge cycles"]), tr!(l, "{v} 次", "{v} 次", "{v}")));
+        }
+        y = widgets::section(&mut c, t, f, y, l.pick(["电池", "電池", "Battery"]));
+        y = widgets::info_card(&mut c, t, f, y, &cells);
+    }
+
+    // What the page cannot do, said plainly, since a page about charging that
+    // stayed silent would look as if it could make the phone charge faster.
+    // The step above settles which of the phone's own programs run; the
+    // protocol itself is still the charger's and the kernel's to settle.
+    let note = l.pick([
+        "档位只决定 recovery 启动哪些小米服务；能到多少功率仍由充电器与内核协商，并不保证达到某个数值。",
+        "檔位只決定 recovery 啟動哪些小米服務；能到多少功率仍由充電器與核心協商，並不保證達到某個數值。",
+        "A step settles which of Xiaomi's services the recovery runs: how much power comes of it is still the charger's and the kernel's to settle, and no particular figure is promised.",
+    ]);
+    y = widgets::footnote(&mut c, t, f, y + t.m.dp(10.0), note);
+
+    Frame::new(t, fit(c, t, y), out, l.pick(CHARGE), top)
+}
 
 /// Which slot the phone starts from next, as the boot control holds it,
 /// and what it holds of each; picking the other and swiping switches.

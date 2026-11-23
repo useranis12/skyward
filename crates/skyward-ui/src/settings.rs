@@ -5,7 +5,7 @@
 //! a time zone, a part or a place by its name, so a later version that lists
 //! them otherwise reads them the same.
 
-use crate::app::{Place, State, SCREEN_OFF, TIME_ZONES};
+use crate::app::{ChargeMode, Place, State, SCREEN_OFF, THERMAL_LIMIT_LEAST, THERMAL_LIMIT_MOST, TIME_ZONES};
 use crate::Lang;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -63,6 +63,12 @@ pub struct Settings {
     pub vibration: f32,
     /// A computer connected over USB is offered internal storage.
     pub file_transfer: bool,
+    /// How fast the phone is let to charge, by name: plain, fast or fastest.
+    pub charge_mode: String,
+    /// Whether the charge is stepped down when the battery gets too warm, and
+    /// how warm is too warm in whole degrees Celsius.
+    pub thermal_guard: bool,
+    pub thermal_limit: u8,
     pub install: Install,
     pub backup: Backup,
     pub logs: Logs,
@@ -142,6 +148,9 @@ impl Settings {
             remember: state.remember,
             vibration: state.vibration,
             file_transfer: state.file_transfer,
+            charge_mode: state.charge_mode.name().to_string(),
+            thermal_guard: state.thermal_guard,
+            thermal_limit: state.thermal_limit,
             install: Install { check_signature: state.check_signature, keep_recovery: state.keep_recovery },
             backup: Backup {
                 parts: names(&state.backup, &PARTS),
@@ -202,6 +211,14 @@ impl Settings {
             state.vibration = self.vibration;
         }
         state.file_transfer = self.file_transfer;
+        if let Some(mode) = ChargeMode::named(&self.charge_mode) {
+            state.charge_mode = mode;
+        }
+        state.thermal_guard = self.thermal_guard;
+        // A limit outside the span the slider offers is a file written by
+        // something else, or by a version whose span was wider: it is brought
+        // inside rather than left to say a temperature the page cannot show.
+        state.thermal_limit = self.thermal_limit.clamp(THERMAL_LIMIT_LEAST, THERMAL_LIMIT_MOST);
         state.check_signature = self.install.check_signature;
         state.keep_recovery = self.install.keep_recovery;
         state.backup = picked(&self.backup.parts, &PARTS);

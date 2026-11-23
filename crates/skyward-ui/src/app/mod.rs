@@ -35,6 +35,7 @@ use skyward_vab::{BootSlots, Hold, Slot, SnapshotState, Standing};
 
 mod act;
 mod backup;
+mod charging;
 mod decrypt;
 mod draw;
 mod entry;
@@ -63,6 +64,7 @@ mod wipe;
 mod wlan;
 
 pub use backup::*;
+pub use charging::*;
 pub use decrypt::*;
 pub use entry::*;
 pub use filesystem::*;
@@ -156,6 +158,10 @@ pub enum Screen {
     License,
     /// The interface typeface and the terms it is used under.
     FontLicense,
+    /// How fast the phone takes power from its charger: as the charger gives
+    /// it, under a ceiling that falls as the battery warms, or at a ceiling
+    /// the owner sets with a guard of their own.
+    Charge,
     /// Which slot the phone starts from next.
     Slot,
     /// The installed system and the one Skyward installed beside it: which
@@ -625,6 +631,11 @@ pub enum Effect {
     /// Merge the update that waits in the slot the phone runs from,
     /// telling how it goes with [`App::set_update`].
     Merge,
+    /// Read the charger again, so the page shows what it is delivering now.
+    ChargeWatch,
+    /// The charge step chosen on the charge page, kept for the next start of
+    /// the recovery, which is when the programs that settle it are started.
+    ChargeStep(ChargeMode),
 }
 
 /// How far the lock's knob has to be dragged for the page behind it to show.

@@ -101,6 +101,12 @@ pub const ENTRIES: &[Entry] = &[
         Screen::FontLicense,
         &["jiemianziti", "jmzt", "ziti", "font", "misans", "kirkmono", "dengkuan"],
     ),
+    entry(
+        ["充电", "充電", "Charging"],
+        ["主页", "主頁", "Home"],
+        Screen::Charge,
+        &["chongdian", "cd", "charge", "charging", "power", "watt", "gonglv", "gl"],
+    ),
     partition("boot", INSTALL, Screen::Install),
     partition("init_boot", INSTALL, Screen::Install),
     partition("vendor_boot", INSTALL, Screen::Install),

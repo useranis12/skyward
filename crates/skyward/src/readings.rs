@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use skyward_config::DeviceConfig;
 use skyward_info::{Battery, DeviceInfo};
 use skyward_sys::worker::{self, Told};
+use skyward_ui::app::ChargeNow;
 use std::os::fd::RawFd;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
@@ -15,9 +16,20 @@ use std::time::{Duration, Instant};
 const BATTERY_EVERY: Duration = Duration::from_secs(1);
 const ALL_EVERY: u32 = 30;
 
+/// What the charger was doing as the readings thread read it: `None` where
+/// nothing is plugged in. Reading it walks the charger's and the battery's own
+/// nodes, which take milliseconds to answer each, so it is read here rather
+/// than where the page is drawn.
+pub type Charge = Option<ChargeNow>;
+
 pub enum Reading {
-    /// The battery, and when reading it started.
-    Battery(Result<Option<Battery>>, Instant),
+    /// The battery, what the charger is doing, and when reading them started.
+    ///
+    /// The charger is read on this thread with the battery rather than on the
+    /// screen's own: reading it walks seven nodes of the charger's and the
+    /// battery's, and doing that where the page is drawn was a stall each time
+    /// a charge figure moved.
+    Battery(Result<Option<Battery>>, Charge, Instant),
     /// All the readings, and when taking them started.
     All(Box<Result<DeviceInfo>>, Instant),
 }
@@ -54,7 +66,13 @@ impl Readings {
                     let reading = if !at_once && ticks.is_multiple_of(ALL_EVERY) {
                         Reading::All(Box::new(skyward_info::collect(&cfg)), at)
                     } else {
-                        Reading::Battery(skyward_info::battery_now(), at)
+                        // The battery is read before the charger, since
+                        // reading the charger is what brings the charger's own
+                        // nodes up to date: read first, the charger answered
+                        // with the figures it had before the charge began.
+                        let battery = skyward_info::battery_now();
+                        let charge = crate::charge::reading();
+                        Reading::Battery(battery, charge, at)
                     };
                     if !tell.tell(reading) {
                         return;

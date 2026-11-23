@@ -721,6 +721,7 @@ mod tests {
             Screen::SkywardUpdate,
             Screen::License,
             Screen::FontLicense,
+            Screen::Charge,
             Screen::Slot,
             Screen::Fastboot,
             Screen::Erase,

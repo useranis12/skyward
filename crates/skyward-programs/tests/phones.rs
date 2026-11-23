@@ -135,7 +135,7 @@ fn every_phone_names_one_program_for_each_service() {
         for build in &vendor {
             let properties = [("ro.boot.hardware", "qcom"), ("ro.boot.product.vendor.sku", build.as_str()), ("ro.boot.product.hardware.sku", hardware.as_str())];
             let read = phone(codename, &properties);
-            let steps = secure::steps(&read).unwrap_or_else(|e| panic!("{codename}, as the build {build:?} of its hardware: {e:#}"));
+            let steps = secure::steps(&read, true, true).unwrap_or_else(|e| panic!("{codename}, as the build {build:?} of its hardware: {e:#}"));
             let told_of = read.told_of();
             let written = skyward_programs::description::offering(&told_of).unwrap_or_else(|e| panic!("{codename}, as the build {build:?} of its hardware: {e:#}"));
             let read_back: Vec<String> = skyward_programs::description::read(&written).unwrap().iter().map(|described| described.name()).collect();
@@ -182,7 +182,7 @@ fn every_phone_names_one_program_for_each_service() {
 /// for it and used its keys with.
 #[test]
 fn nezha_s_programs_are_found_as_they_were_started_on_the_phone() {
-    let steps = secure::steps(&phone("nezha", &[("ro.boot.hardware", "qcom"), ("ro.special_edition", "true")])).unwrap();
+    let steps = secure::steps(&phone("nezha", &[("ro.boot.hardware", "qcom"), ("ro.special_edition", "true")]), true, true).unwrap();
     let expected = [
         Started { service: listeners(), sockets: vec![socket("notify-topology", "drmrpc")], environment: Vec::new(), anew: false },
         Started {
@@ -217,7 +217,7 @@ fn nezha_s_programs_are_found_as_they_were_started_on_the_phone() {
 #[test]
 fn nezha_s_other_builds_reach_their_weaver_s_secure_element_through_the_secure_element_service() {
     for properties in [&[("ro.boot.hardware", "qcom")][..], &[("ro.boot.hardware", "qcom"), ("ro.special_edition", "false")][..]] {
-        let steps = secure::steps(&phone("nezha", properties)).unwrap();
+        let steps = secure::steps(&phone("nezha", properties), true, true).unwrap();
         assert_eq!(
             names(&steps),
             [
@@ -258,7 +258,7 @@ fn nezha_s_other_builds_reach_their_weaver_s_secure_element_through_the_secure_e
 #[test]
 fn ishtar_s_programs_are_found_as_they_were_started_on_the_phone_and_its_opener_with_them() {
     let properties = [("ro.boot.hardware", "qcom"), ("ro.boot.product.vendor.sku", "kalama"), ("ro.boot.product.hardware.sku", "ishtar")];
-    let steps = secure::steps(&phone("ishtar", &properties)).unwrap();
+    let steps = secure::steps(&phone("ishtar", &properties), true, true).unwrap();
     let expected = [
         Started { service: listeners(), sockets: vec![socket("notify-topology", "drmrpc")], environment: Vec::new(), anew: false },
         Started {
@@ -290,7 +290,7 @@ fn ishtar_s_programs_are_found_as_they_were_started_on_the_phone_and_its_opener_
 #[test]
 fn dada_s_weaver_goes_through_the_secure_element_service_to_the_element_s_own_service() {
     let properties = [("ro.boot.hardware", "qcom"), ("ro.boot.product.vendor.sku", "sun")];
-    let steps = secure::steps(&phone("dada", &properties)).unwrap();
+    let steps = secure::steps(&phone("dada", &properties), true, true).unwrap();
     assert_eq!(
         names(&steps),
         [
@@ -325,7 +325,7 @@ fn dada_s_weaver_goes_through_the_secure_element_service_to_the_element_s_own_se
 fn byron_s_secure_element_is_told_of_among_all_its_vendor_partition_registers() {
     for build in builds("byron", "vendor") {
         let properties = [("ro.boot.hardware", "qcom"), ("ro.boot.product.vendor.sku", build.as_str())];
-        let steps = secure::steps(&phone("byron", &properties)).unwrap();
+        let steps = secure::steps(&phone("byron", &properties), true, true).unwrap();
         let found = secure::programs(&steps);
         let element = found.iter().find(|s| s.service.path.ends_with("secure_element-service.qti")).expect("its secure element has a service of its own");
         assert_eq!(element.service.ready_service.as_deref(), Some("android.hardware.secure_element.ISecureElement/eSE1"));

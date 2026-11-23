@@ -7,10 +7,14 @@ use skyward_config::DeviceConfig;
 use skyward_programs::secure::Started;
 use skyward_sys::{bcb, Power};
 use skyward_vab::SnapshotState;
+#[cfg(target_os = "android")]
+use skyward_ui::app::ChargeMode;
 use std::path::{Path, PathBuf};
 
 #[cfg(target_os = "android")]
 mod backup;
+#[cfg(target_os = "android")]
+mod charge;
 #[cfg(target_os = "android")]
 mod decrypt;
 #[cfg(target_os = "android")]
@@ -308,7 +312,7 @@ fn main() -> Result<()> {
             let services: Vec<Started> = DeviceConfig::load(&config)?.services.into_iter().filter(|s| s.runs_on(&props)).map(Started::from).collect();
             let libraries = secure::libraries()?;
             services::start(&services, libraries.as_deref())?;
-            keys::start(&keys::found(slot, libraries.as_deref())?.steps?, libraries.as_deref())?;
+            keys::start(&keys::found(slot, libraries.as_deref())?.steps?, libraries.as_deref(), skyward_ui::app::ChargeMode::default())?;
             loop {
                 std::thread::park();
             }
@@ -533,6 +537,22 @@ fn load_modules(cfg: &DeviceConfig, names: &[String]) -> Result<Vec<PathBuf>> {
 /// The programs that use the phone's keys come after them, as `found`
 /// among the phone's partitions: where what the partitions say could not
 /// be made out, the phone's devices are up before that is said.
+/// How fast the phone is let to charge, as the settings file kept it from the
+/// starts before: the plain rate where it names no step, or one this version
+/// has not. Read here, on the thread the screen does not wait for, since the
+/// programs that settle it are started on this thread and a step chosen after
+/// they start would not reach the phone until the recovery starts again.
+#[cfg(target_os = "android")]
+fn charging_mode() -> ChargeMode {
+    match settings::read() {
+        Ok(kept) => kept.settings().and_then(|s| ChargeMode::named(&s.charge_mode)).unwrap_or_default(),
+        Err(e) => {
+            let _ = skyward_sys::kmsg(&format!("the charge speed is the plain one, since the settings were not read: {e:#}"));
+            ChargeMode::default()
+        }
+    }
+}
+
 #[cfg(target_os = "android")]
 fn bring_up(cfg: &DeviceConfig, slot: skyward_vab::Slot, found: Result<keys::Found>) -> Result<()> {
     let nodes = skyward_sys::ueventd::apply()?;
@@ -625,7 +645,17 @@ fn bring_up(cfg: &DeviceConfig, slot: skyward_vab::Slot, found: Result<keys::Fou
     for line in keys::describe(&steps) {
         skyward_sys::kmsg(&format!("for the phone's keys: {}", line.replace("\n  ", ", ")))?;
     }
-    keys::start(&steps, libraries.as_deref())?;
+    // The step the settings file kept is what this start settles on: the
+    // programs that settle how fast a charge may run are started here, and a
+    // step chosen after they start would not reach the phone until the
+    // recovery starts again. The page says so, which is why it says the step
+    // reaches the phone at the next start.
+    let mode = charging_mode();
+    let started = keys::start(&steps, libraries.as_deref(), mode)?;
+    skyward_sys::kmsg(&format!(
+        "the charge step kept is {}: {started} program(s) of the phone's that settle it were started",
+        mode.name()
+    ))?;
     skyward_ui::progress::reached(skyward_ui::progress::READY);
     agree_on_the_notes_key(&registering)
 }

@@ -121,6 +121,9 @@ pub struct Battery {
     pub full: Option<u64>,
     /// Voltage in µV.
     pub voltage: Option<u64>,
+    /// Current in µA, as the kernel signs it: negative while the battery is
+    /// being charged, positive while it is being drained.
+    pub current: Option<i64>,
     /// A charger charging it quickly, as Xiaomi's Qualcomm phones tell
     /// beside their power supplies.
     pub quick: bool,
@@ -130,6 +133,14 @@ pub struct Battery {
 }
 
 impl Battery {
+    /// The power going in or out of the battery, in watts: the current's
+    /// magnitude times the voltage, the current being signed by the kernel and
+    /// negative while the battery is charged. None where either is not told.
+    pub fn watts(&self) -> Option<f32> {
+        let (current, voltage) = (self.current?, self.voltage?);
+        Some((current.unsigned_abs() as f32 * voltage as f32) / 1e12)
+    }
+
     /// Whether it charges, or is full and topped up.
     pub fn charging(&self) -> bool {
         matches!(self.charge, Charge::Charging | Charge::Full)
@@ -406,6 +417,7 @@ fn battery(root: &Path) -> Result<Option<Battery>> {
         design: parse_opt(dir.join("charge_full_design"), "charge_full_design")?,
         full: parse_opt(dir.join("charge_full"), "charge_full")?,
         voltage: parse_opt(dir.join("voltage_now"), "voltage_now")?,
+        current: parse_opt(dir.join("current_now"), "current_now")?,
         // How quickly the charger charges: 0 normally, then fast, flash,
         // turbo and super, which the stock SystemUI all counts quick.
         quick: parse_opt::<u8>(root.with_file_name("qcom-battery").join("quick_charge_type"), "quick_charge_type")?.is_some_and(|k| (1..=4).contains(&k)),

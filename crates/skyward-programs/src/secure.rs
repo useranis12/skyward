@@ -8,6 +8,7 @@ use crate::phone::{Happens, Phone};
 use crate::script::{Program, Socket};
 use anyhow::{bail, ensure, Context, Result};
 use skyward_config::Service;
+use std::path::Path;
 
 /// The key service, and the packages whose services it serves besides: it
 /// is one program behind them all.
@@ -68,6 +69,37 @@ const OPENERS: [&str; 2] = ["ssgtzd", "hlosminkdaemon"];
 /// knows it under, and the property it sets once it takes calls.
 const HARDWARE_DIRECTORY: &str = "hwservicemanager";
 const HARDWARE_DIRECTORY_READY: &str = "hwservicemanager.ready";
+
+/// Xiaomi's charging service: the program that tells the kernel how fast to
+/// charge, by the service it registers.
+///
+/// The kernel decides what a charge may draw, and it asks this program
+/// first: without it the charge is held at 2 A whatever the charger offers,
+/// and the protocol stays at plain power delivery rather than going on to
+/// the adjustable kind. On the phone this was written for the kernel log
+/// says so plainly — `ichg:[batt_auth][2000]` against the stock system's
+/// `ichg:[volt_thermal_limit][3000]`, which is what it says once this
+/// program has told the kernel the battery passed its check.
+///
+/// A phone that does not carry the service is left as it was: nothing here
+/// is required of a recovery, and a phone without it charges as it always
+/// has.
+const CHARGING: &str = "vendor.xiaomi.hardware.micharge.IMiCharge/default";
+
+/// Xiaomi's secret keeper, by the name of its file: the program that asks
+/// the phone's power delivery stack to verify the charger.
+///
+/// The kernel log of the stock system says what it does and when: the
+/// thread that makes it say `verify_process: 1` and then, half a second
+/// later, `set pd_verifed: 1` is this program's, and it is only after that
+/// that the charge goes on from a fixed voltage to the adjustable kind. The
+/// same 100 W charger is held at 9 V by a recovery that does not start it,
+/// and runs at 17.5 V in the system that does.
+const SECRET: &str = "batterysecret";
+
+/// Where the vendor partition keeps the programs a script of its own does
+/// not name.
+const VENDOR_PROGRAMS: &str = "/vendor/bin";
 
 /// The folders a program's libraries are looked for in, by the partition
 /// the program is on: the recovery's own come before the vendor
@@ -169,7 +201,15 @@ enum Ready {
 /// phone with a weaver, start what the weaver reaches its secure element
 /// through, serving Android's secure element service where that is what it
 /// goes through, and the weaver; and start the boot control.
-pub fn steps(phone: &Phone) -> Result<Vec<Step>> {
+///
+/// `charging` and `verifying` are how fast the phone is let to charge, as
+/// the two programs that settle that with the kernel: Xiaomi's charging
+/// service, which passes on the battery's own check, and Xiaomi's secret
+/// keeper, which has the charger verified so the protocol may go on to the
+/// adjustable kind. Each is started only where it is asked for, so a phone
+/// that is let charge at the plain rate is left as a recovery without them
+/// leaves it.
+pub fn steps(phone: &Phone, charging: bool, verifying: bool) -> Result<Vec<Step>> {
     let mut out = Vec::new();
     let start = |out: &mut Vec<Step>, started: Started| out.push(Step::Start(Box::new(started)));
     if let Some(listeners) = named(phone, LISTENERS)? {
@@ -212,7 +252,62 @@ pub fn steps(phone: &Phone) -> Result<Vec<Step>> {
     let program = behind(phone, "the boot control", &boot, |file| file.starts_with(BOOT.0))?;
     let registers = besides(phone, program, &boot, alone);
     start(&mut out, started(phone, program, ready(boot, boot_kind), registers));
+
+    // Xiaomi's charging service, on a phone that carries it: the kernel asks
+    // it before it lets a charge draw more than 2 A, so a recovery without it
+    // charges at 2 A however much the charger offers. It is started last,
+    // since nothing else waits on it, and a phone without it is left alone.
+    if charging
+        && described(phone, Kind::Aidl, CHARGING).is_some()
+        && let Ok(program) = behind(phone, "the charging service", CHARGING, |file| file.contains("micharge"))
+    {
+        let registers = besides(phone, program, CHARGING, alone);
+        start(&mut out, started(phone, program, Ready::Service(CHARGING.into()), registers));
+    }
+
+    // Xiaomi's secret keeper, on a phone that carries it: the kernel asks it
+    // to have the charger verified, and until it has, a charge stays at a
+    // fixed voltage however much the charger offers. It is started after the
+    // charging service, which it is no service of and nothing waits on: it
+    // registers nothing, so it is waited on by nothing.
+    if verifying
+        && let Some(started) = secret(phone)
+    {
+        start(&mut out, started);
+    }
     Ok(out)
+}
+
+/// Xiaomi's secret keeper, as it is started, where the phone carries one:
+/// the program its scripts name, else the one the vendor partition has under
+/// that name and that no script of the phone's starts. None where the phone
+/// has neither, which leaves a phone without it charging as it always has.
+///
+/// It is run as root with nothing of init's but its path: it registers no
+/// service and waits on no property, so it is given no socket and no
+/// environment, and a phone whose scripts say nothing of it is left with what
+/// the vendor partition says of it alone.
+fn secret(phone: &Phone) -> Option<Started> {
+    if let Ok(Some(program)) = named(phone, SECRET) {
+        return Some(started(phone, program, Ready::Nothing, Vec::new()));
+    }
+    let path = format!("{VENDOR_PROGRAMS}/{SECRET}");
+    Path::new(&path).is_file().then(|| {
+        Started::from(Service {
+            path: path.clone(),
+            args: Vec::new(),
+            libraries: libraries_of(&path),
+            oneshot: false,
+            ready_property: None,
+            ready_service: None,
+            registers: Vec::new(),
+            ready_hardware_service: None,
+            when: None,
+            user: None,
+            groups: Vec::new(),
+            capabilities: Vec::new(),
+        })
+    })
 }
 
 /// The description that tells of the service `name`, where it is the one

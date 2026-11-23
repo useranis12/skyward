@@ -1,4 +1,5 @@
 use crate::backup;
+use crate::charge;
 use crate::fetch;
 use crate::fileserve;
 use crate::remember;
@@ -40,9 +41,9 @@ use skyward_sys::sleep::{Sleeper, Slept};
 use skyward_sys::uevent;
 use skyward_systems::Who;
 use skyward_ui::app::{
-    App, Asked, BackupAt, BackupEnd, BackupEntry, BackupRefusal, ClashChoice, Data, DownloadEnd, Effect, EraseStop, FileKind, FileOp,
-    FileRow, FileTask, FsAction, FsRow, Have, Held, ItemEnd, ItemState, JobEnd, Keys, MountFailure, Part, PartKind, PartStop, Place,
-    RenameRefused, Screen, Shot, SkywardEnd, SkywardStage, Target, UsbDrive, UsbLink, Wipe, DATA_OPENING, DATA_PARTITION, DOWNLOADS,
+    App, Asked, BackupAt, BackupEnd, BackupEntry, BackupRefusal, ChargeMode, ChargeNow, ClashChoice, Data, DownloadEnd, Effect, EraseStop,
+    FileKind, FileOp, FileRow, FileTask, FsAction, FsRow, Have, Held, ItemEnd, ItemState, JobEnd, Keys, MountFailure, Part, PartKind, PartStop,
+    Place, RenameRefused, Screen, Shot, SkywardEnd, SkywardStage, Target, UsbDrive, UsbLink, Wipe, DATA_OPENING, DATA_PARTITION, DOWNLOADS,
     INSTALL_UNFINISHED, USB_DRIVE,
 };
 use skyward_ui::settings::Keeper;
@@ -68,6 +69,13 @@ const LEAVE_AFTER_MS: u64 = 1500;
 /// How long after the screen starts a touch panel may still come up; with
 /// none by then, the pages are worked with the keys, their light shown.
 const TOUCH_WAIT: Duration = Duration::from_secs(5);
+
+/// How long into a start the thermal guard waits before it acts, so a step
+/// is not taken twice: the readings go on coming while the recovery is being
+/// started again, and a battery still warm from the charge a step was taken
+/// over would otherwise step the charge down again before the phone had
+/// charged at the step the last one chose.
+const THERMAL_SETTLE_MS: u64 = 60_000;
 
 /// How long a panel gone dark rests, ready to light again at once, before
 /// the display turns off; the phone's own system keeps its panel dozing
@@ -1201,6 +1209,12 @@ struct Pages<'a> {
     /// the kernel took up again as the snapshots were mapped, or one started
     /// on the update page.
     merger: Option<merge::Merger>,
+    /// Whether what the charge nodes answer has been said, so it is said
+    /// once rather than with every reading.
+    charge_said: bool,
+    /// Whether the last reading found a charger, so the nodes are said again
+    /// as one comes or goes.
+    charge_present: bool,
     /// The second system's work, on a phone that can hold one.
     systems_worker: Option<systems::Worker>,
     /// A switch the system asked for, under way; then the phone starts the
@@ -1436,6 +1450,8 @@ impl<'a> Pages<'a> {
             relabeler: None,
             backuper: None,
             merger: None,
+            charge_said: false,
+            charge_present: false,
             systems_worker,
             switch_asked: false,
             switched: false,
@@ -1698,7 +1714,7 @@ impl<'a> Pages<'a> {
     fn take_readings(&mut self, now: u64) -> Result<()> {
         for reading in self.readings.taken() {
             match reading {
-                Reading::Battery(battery, at) => {
+                Reading::Battery(battery, charge, at) => {
                     if self.asked.is_some_and(|asked| at >= asked) {
                         self.asked = None;
                     }
@@ -1710,6 +1726,12 @@ impl<'a> Pages<'a> {
                         self.info.battery = battery;
                         self.app.refresh();
                     }
+                    // What the charger is doing came back with the battery,
+                    // read on the readings thread rather than here: the
+                    // charger's nodes take milliseconds to answer, and reading
+                    // them where the page is drawn was a stall each time a
+                    // charge figure moved.
+                    self.charge_taken(charge, now)?;
                 }
                 Reading::All(all, at) => {
                     if self.asked.is_some_and(|asked| at >= asked) {
@@ -2883,8 +2905,127 @@ impl Pages<'_> {
             }
             Effect::EnterRecovery => self.enter_recovery()?,
             Effect::FileTransfer(on) => self.file_transfer(on, now)?,
+            Effect::ChargeWatch => self.charge_watch(now)?,
+            Effect::ChargeStep(mode) => self.charge_step(mode)?,
         }
         Ok(Vec::new())
+    }
+
+    /// Read the charger again, so the page shows what it is delivering now.
+    /// Runs with the battery's own reading, once a second, and with the page
+    /// opening.
+    fn charge_watch(&mut self, _now: u64) -> Result<()> {
+        // What every node answers is said once, so a page that comes up empty
+        // says which node went quiet rather than leaving it to be guessed at.
+        if !self.charge_said {
+            self.charge_said = true;
+            charge::describe();
+        }
+        // The charger is read on the readings thread, so asking for a reading
+        // of the battery asks for one of the charger with it.
+        self.readings.ask();
+        self.asked = Some(Instant::now());
+        Ok(())
+    }
+
+    /// Take in what the charger was doing as the readings thread read it.
+    fn charge_taken(&mut self, charge: Option<ChargeNow>, _now: u64) -> Result<()> {
+        if !self.charge_said {
+            self.charge_said = true;
+            charge::describe();
+        }
+        // What the nodes say as the charger comes and goes, so a page that says
+        // nothing of a charge that is plainly running says why: the nodes it
+        // reads may be quiet, or may be the wrong ones.
+        let said = charge.is_some();
+        if said != self.charge_present {
+            self.charge_present = said;
+            charge::describe();
+        }
+        self.app.set_charge_state(charge);
+        // The battery's own temperature, which the battery card shows and the
+        // thermal guard watches.
+        self.app.state.battery_temp = charge::temperature();
+        // What the kernel says about the battery's check, which is what
+        // decides the current the charge may draw.
+        self.app.state.fast_charge_kernel = charge::fast();
+        self.thermal_guard(_now)?;
+        Ok(())
+    }
+
+    /// Step the charge down where the battery has got warmer than the limit
+    /// the charge page keeps, and start the recovery again so the step takes.
+    ///
+    /// The step is the programs the recovery starts, so a step cannot change
+    /// under a charge that is already running: the kernel keeps what those
+    /// programs told it for as long as the cable is in. Starting the recovery
+    /// again is what makes a step take, and a start takes a moment while the
+    /// charge has been running for minutes.
+    ///
+    /// Nothing is done on the plain step, which starts neither of Xiaomi's
+    /// programs: what a charge draws there cannot warm the battery enough to
+    /// matter, so the page neither offers the guard nor obeys it there.
+    ///
+    /// Nothing is done in the first minute of a start either, and that is what
+    /// keeps a step from being taken twice: the readings go on coming while
+    /// the recovery is being started again, and a battery still warm from the
+    /// charge just ended would step the charge down a second time before the
+    /// phone had charged at the step the first one chose. A minute is longer
+    /// than a start takes and long enough for the charge to settle.
+    fn thermal_guard(&mut self, now: u64) -> Result<()> {
+        if !self.app.state.thermal_guard || !self.app.state.charge_mode.guarded() {
+            return Ok(());
+        }
+        if now < THERMAL_SETTLE_MS {
+            return Ok(());
+        }
+        let Some(temp) = self.app.state.battery_temp else { return Ok(()) };
+        // The temperature is in tenths of a degree; the limit is whole degrees.
+        let limit = i32::from(self.app.state.thermal_limit) * 10;
+        if temp < limit {
+            return Ok(());
+        }
+        let Some(cooler) = self.app.state.charge_mode.stepped_down() else { return Ok(()) };
+        self.app.state.charge_mode = cooler;
+        let kept = self.app.settings();
+        skyward_sys::kmsg(&format!(
+            "the battery is at {:.1} C, past the {} C limit: the charge steps down to {} and the recovery starts again",
+            temp as f64 / 10.0,
+            self.app.state.thermal_limit,
+            cooler.name()
+        ))?;
+        // The step is written before the recovery starts again, since the
+        // start reads it back: a step left in memory would be gone with the
+        // recovery that held it.
+        match settings::write(&kept) {
+            Ok(()) => self.keeper.written(kept),
+            Err(e) => {
+                skyward_sys::kmsg(&format!("the settings were not kept: {e:#}"))?;
+                self.keeper.failed();
+                return Ok(());
+            }
+        }
+        power(Target::Recovery)
+    }
+
+    /// Take in the step chosen on the charge page.
+    ///
+    /// The step is kept and reaches the phone at the next start of the
+    /// recovery, which the page says. It cannot reach it sooner: the programs
+    /// that settle a charge are started once, as the recovery comes up, and
+    /// what the secret keeper tells the kernel of a charge cannot be taken
+    /// back while the cable is in — so ending it later leaves the charge as
+    /// fast as it would have been, and starting it later does nothing until
+    /// the phone is started again anyway.
+    ///
+    /// The step is saved by the keeper that saves the rest of the settings,
+    /// so nothing is done here but to say which one it is.
+    fn charge_step(&mut self, mode: ChargeMode) -> Result<()> {
+        skyward_sys::kmsg(&format!(
+            "the charge step is {}: it takes effect at the next start of the recovery",
+            mode.name()
+        ))?;
+        Ok(())
     }
 
     /// The second system's work, which only a phone that can hold a second

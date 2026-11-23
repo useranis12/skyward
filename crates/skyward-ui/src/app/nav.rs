@@ -284,6 +284,9 @@ impl App {
     /// how it learns which control a user's screen lock is answered with.
     pub(super) fn arrive_at(&mut self, s: Screen) -> Vec<Effect> {
         match s {
+            // Opening the page reads the charger, so it says what the phone is
+            // taking rather than what it was taking when last looked at.
+            Screen::Charge => vec![Effect::ChargeWatch],
             Screen::Mount => vec![Effect::ReadMounts],
             Screen::Filesystems => vec![Effect::ReadFilesystems],
             Screen::Slot | Screen::Reboot => vec![Effect::ReadSlots],

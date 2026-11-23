@@ -39,7 +39,12 @@ pub fn found(slot: skyward_vab::Slot, libraries: Option<&Path>) -> Result<Found>
         name(&unnamed, libraries)?;
         phone = read(slot)?;
     }
-    Ok(Found { described: phone.told_of(), steps: secure::steps(&phone) })
+    // Both programs that settle how fast a charge may run are described here,
+    // and which of them is started is the charge page's to say: a step that
+    // was chosen at the last start is the one the recovery comes up with, so
+    // the steps are found with both asked for and the choice made as they are
+    // started.
+    Ok(Found { described: phone.told_of(), steps: secure::steps(&phone, true, true) })
 }
 
 /// The phone as the partitions of the slot's installed system describe it,
@@ -97,19 +102,56 @@ pub fn serves_elements(steps: &[Step]) -> bool {
 /// is after the secure elements' own services have registered and before
 /// the weaver that reaches its secure element through it starts.
 ///
-/// `libraries` is a directory of shared libraries every program may need,
-/// searched after whatever it names itself.
-pub fn start(steps: &[Step], libraries: Option<&Path>) -> Result<()> {
+/// The programs that settle how fast a charge may run are among the last.
+/// Which of them are started is the step the charge page kept, decided here
+/// rather than by starting them all and ending some: what the secret keeper
+/// tells the kernel of a charge cannot be taken back while the cable is in,
+/// so one that runs even for a moment leaves the charge as fast as it would
+/// have been. Gives how many of them were started.
+pub fn start(steps: &[Step], libraries: Option<&Path>, mode: skyward_ui::app::ChargeMode) -> Result<usize> {
+    let mut started = 0;
     for step in steps {
         match step {
-            Step::Start(program) => crate::services::start(std::slice::from_ref(program.as_ref()), libraries)?,
+            Step::Start(program) => {
+                let settles = settles_the_charge(&program.service.path);
+                let wanted = if !settles {
+                    true
+                } else if program.service.path.contains("micharge") {
+                    mode.charging_service()
+                } else {
+                    mode.secret_keeper()
+                };
+                if settles {
+                    skyward_sys::kmsg(&format!(
+                        "{} settles how fast a charge may run, and the step {} names it: {wanted}",
+                        program.service.path,
+                        mode.name()
+                    ))?;
+                }
+                if !wanted {
+                    continue;
+                }
+                crate::services::start(std::slice::from_ref(program.as_ref()), libraries)?;
+                if settles {
+                    started += 1;
+                }
+            }
             Step::ServeElements => {
                 let readers = skyward_omapi::start()?;
                 skyward_sys::kmsg(&format!("{} is served, with a reader for each of {} secure elements: {}", skyward_omapi::SERVICE, readers.len(), readers.join(", ")))?;
             }
         }
     }
-    Ok(())
+    Ok(started)
+}
+
+/// Whether the program at `path` is one of the two that settle how fast a
+/// charge may run: Xiaomi's charging service, which passes on the battery's
+/// own check, and its secret keeper, which has the charger verified. They
+/// are the only two the charge page's steps name, so they are the only two
+/// whose say the page needs.
+pub fn settles_the_charge(path: &str) -> bool {
+    path.contains("micharge") || path.ends_with("/batterysecret")
 }
 
 /// What `steps` are, a line each, as the `keys` command prints them.
