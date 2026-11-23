@@ -93,6 +93,7 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::ImageBackup => image_backup(cx),
         Screen::Tasks => tasks(cx),
         Screen::PowerOff => power_off(cx),
+        Screen::Avb => avb(cx),
         Screen::Filesystem => filesystem(cx),
         Screen::PartWork => part_work(cx),
         Screen::Language => language(cx),
@@ -2478,6 +2479,7 @@ pub fn advanced(cx: &Ctx) -> Frame {
         Row::new(l.pick(RELABEL)).icon(PURPLE, Icon::Shield),
         Row::new(l.pick(PARTITIONS)).icon(RED, Icon::Mount),
         Row::new(l.pick(IMAGE_BACKUP)).icon(BLUE, Icon::Backup),
+        Row::new(l.pick(AVB)).icon(GREEN, Icon::Shield),
         Row::new(l.pick(POWER_OFF)).icon(SLATE, Icon::Power),
         Row::new(l.pick(TASKS)).icon(BLUE, Icon::Layers),
         Row::new(l.pick(FILESYSTEMS)).icon(RED, Icon::Mount),
@@ -2492,6 +2494,7 @@ pub fn advanced(cx: &Ctx) -> Frame {
         Action::Open(Screen::Relabel),
         Action::Open(Screen::Partitions),
         Action::Open(Screen::ImageBackup),
+        Action::Open(Screen::Avb),
         Action::Open(Screen::PowerOff),
         Action::Open(Screen::Tasks),
         Action::Open(Screen::Filesystems),
@@ -2509,6 +2512,7 @@ const PARTITIONS: Text = ["分区管理", "分割區管理", "Partitions"];
 const IMAGE_BACKUP: Text = ["镜像备份", "映像檔備份", "Image backup"];
 const TASKS: Text = ["任务", "任務", "Tasks"];
 const POWER_OFF: Text = ["关机", "關機", "Power off"];
+const AVB: Text = ["AVB 校验", "AVB 驗證", "AVB verification"];
 const STOPPED: Text = ["已停止", "已停止", "Stopped"];
 const STOPPING: Text = ["正在停止", "正在停止", "Stopping"];
 
@@ -3086,6 +3090,150 @@ pub fn power_off(cx: &Ctx) -> Frame {
     let track = widgets::confirm(&mut c, t, f, y + t.m.dp(28.0), label, danger, s.confirm);
     out.push(Hit { rect: track, action: Action::Confirm(Confirm::PowerOff) });
     Frame::new(t, c, out, l.pick(POWER_OFF), top)
+}
+
+/// Android Verified Boot's checks in the running slot: what they are, and
+/// where the bootloader is unlocked, switches for them and the saved
+/// top-level vbmeta image to back up or restore.
+pub fn avb(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    // The page carries what turning a check off costs and how a phone that
+    // no longer starts is brought back, which runs past three screens.
+    let mut c = long_page_of(cx, 4);
+    let mut out = Vec::new();
+    let top = t.m.content_top;
+    let title = l.pick(AVB);
+    let state = match &s.avb {
+        None => {
+            let y = widgets::list(&mut c, t, f, top, &[Row::new(l.pick(["正在读取 AVB 状态", "正在讀取 AVB 狀態", "Reading AVB state"])).trail(Trail::None)]).bottom;
+            return Frame::new(t, fit(c, t, y), out, title, top);
+        }
+        Some(Err(why)) => {
+            let y = widgets::list(&mut c, t, f, top, &[Row::new(l.pick(["无法读取 AVB 状态", "無法讀取 AVB 狀態", "Couldn't read AVB state"])).trail(Trail::None)]).bottom;
+            let y = widgets::footnote(&mut c, t, f, y, why);
+            let retry = widgets::list(&mut c, t, f, y + t.m.card_gap, &[Row::new(l.pick(["重试", "重試", "Try again"])).trail(Trail::None)]);
+            out.extend(hits(&retry.rows, &[Action::ReadAvb]));
+            return Frame::new(t, fit(c, t, retry.bottom), out, title, top);
+        }
+        Some(Ok(state)) => state,
+    };
+    let lock = match state.unlocked {
+        Some(true) => l.pick(["已解锁", "已解鎖", "Unlocked"]),
+        Some(false) => l.pick(["已锁定", "已鎖定", "Locked"]),
+        None => l.pick(["未知", "未知", "Unknown"]),
+    };
+    let backup = l.pick(if state.backup { ["已有备份", "已有備份", "Backed up"] } else { ["尚未备份", "尚未備份", "Not backed up"] });
+    let rollback = state.rollback_index.to_string();
+    let y = widgets::info_card(
+        &mut c,
+        t,
+        f,
+        top,
+        &[
+            (l.pick(["Bootloader", "Bootloader", "Bootloader"]), lock.to_string()),
+            (l.pick(["回滚索引", "回滾索引", "Rollback index"]), rollback),
+            (l.pick(["vbmeta 备份", "vbmeta 備份", "vbmeta backup"]), backup.to_string()),
+        ],
+    );
+    let y = widgets::section(&mut c, t, f, y, l.pick(["校验开关", "驗證開關", "Checks"]));
+    let actions = widgets::list(
+        &mut c,
+        t,
+        f,
+        y,
+        &[
+            Row::new(l.pick(["dm-verity", "dm-verity", "dm-verity"])).trail(Trail::Switch(state.verity)),
+            Row::new(l.pick(["启动验证", "啟動驗證", "Boot verification"])).trail(Trail::Switch(state.verification)),
+            Row::new(l.pick(["备份 vbmeta", "備份 vbmeta", "Back up vbmeta"])).icon(GREEN, Icon::Backup).trail(Trail::Arrow),
+            Row::new(l.pick(["恢复 vbmeta", "還原 vbmeta", "Restore vbmeta"])).icon(ORANGE, Icon::Restore).trail(Trail::Arrow),
+        ],
+    );
+    if state.unlocked == Some(true) {
+        out.extend(hits(&actions.rows[..2], &[Action::ToggleAvb(AvbCheck::Verity), Action::ToggleAvb(AvbCheck::Verification)]));
+        out.extend(hits(&actions.rows[2..3], &[Action::BackupVbmeta]));
+        if state.backup {
+            out.extend(hits(&actions.rows[3..4], &[Action::RestoreVbmeta]));
+        }
+    }
+    let mut y = actions.bottom;
+    y = avb_warning(&mut c, cx, y);
+    match state.unlocked {
+        Some(true) => {}
+        Some(false) => {
+            y = widgets::footnote(
+                &mut c,
+                t,
+                f,
+                y,
+                l.pick([
+                    "Bootloader 已锁定，不能修改 AVB 或备份、恢复 vbmeta。",
+                    "Bootloader 已鎖定，不能修改 AVB 或備份、還原 vbmeta。",
+                    "The bootloader is locked, so AVB and vbmeta cannot be changed or backed up.",
+                ]),
+            );
+        }
+        None => {
+            y = widgets::footnote(
+                &mut c,
+                t,
+                f,
+                y,
+                l.pick(["无法确定 Bootloader 是否解锁，已禁用修改。", "無法確定 Bootloader 是否解鎖，已停用修改。", "The bootloader's lock state is unknown, so changes are disabled."]),
+            );
+        }
+    }
+    if let Some(notice) = &s.avb_notice {
+        y = widgets::footnote(&mut c, t, f, y + t.m.card_gap, notice);
+    }
+    Frame::new(t, fit(c, t, y), out, title, top)
+}
+
+/// What turning a check off does to the system already installed, and how a
+/// phone that no longer starts is brought back: the page that offers the
+/// switch is the one place someone can read this before using it, and the
+/// one place they can still reach once it has gone wrong.
+fn avb_warning(c: &mut Canvas, cx: &Ctx, y: f32) -> f32 {
+    let (t, f, l) = (cx.t, cx.f, cx.state.lang);
+    let title = l.pick([
+        "关闭校验后官方系统将无法启动",
+        "關閉驗證後官方系統將無法啟動",
+        "Turning a check off stops the official system from starting",
+    ]);
+    let detail = l.pick([
+        "这不是签名问题，解锁与否都一样：系统的 init 在 verity 关闭时不挂载分区，只能线刷恢复。",
+        "這不是簽名問題，解鎖與否都一樣：系統的 init 在 verity 關閉時不掛載分割區，只能線刷還原。",
+        "The signature is not the reason, and unlocking does not help: with verity off the system's init mounts no partition, and only a fastboot package brings it back.",
+    ]);
+    let y = widgets::list(c, t, f, y + t.m.card_gap, &[standing(title, RED, Icon::Systems, detail)]).bottom;
+    let points = [
+        l.pick([
+            "改用第三方系统时关闭校验才有意义，官方系统请保持开启。",
+            "改用第三方系統時關閉驗證才有意義，官方系統請保持開啟。",
+            "Turning a check off only helps with a system other than the phone's own; leave it on for the official one.",
+        ]),
+        l.pick([
+            "卡在 fastboot 时，先试 fastboot set_active 切到另一个槽位，再 fastboot continue；另一个槽位装过系统才有用。",
+            "卡在 fastboot 時，先試 fastboot set_active 切換到另一個槽位，再 fastboot continue；另一個槽位裝過系統才有用。",
+            "Stuck at fastboot: try fastboot set_active for the other slot, then fastboot continue. It helps only where that slot holds a system.",
+        ]),
+        l.pick([
+            "仍进不去就刷完整的线刷包，它会一并刷回 vbmeta 并清掉 misc 里的启动指令，这样才恢复得了。",
+            "仍進不去就刷完整的線刷包，它會一併刷回 vbmeta 並清掉 misc 裡的啟動指令，這樣才還原得了。",
+            "If it still does not start, flash the full fastboot package: it writes vbmeta back and clears the start request in misc, which is what makes the phone start again.",
+        ]),
+        l.pick([
+            "只重刷 vbmeta 往往不够，而且要先确认当前槽位：fastboot getvar current-slot，刷的必须是这个槽位的 vbmeta。",
+            "只重刷 vbmeta 往往不夠，而且要先確認目前槽位：fastboot getvar current-slot，刷的必須是這個槽位的 vbmeta。",
+            "Flashing vbmeta alone often is not enough, and the slot has to match: fastboot getvar current-slot, then flash that slot's vbmeta.",
+        ]),
+        l.pick([
+            "改动前请先备份 vbmeta，备份读不回来时不要改动。",
+            "改動前請先備份 vbmeta，備份讀不回來時不要改動。",
+            "Back vbmeta up before changing it, and do not change it when the backup cannot be read back.",
+        ]),
+    ];
+    let heading = l.pick(["关闭之前", "關閉之前", "Before turning it off"]);
+    widgets::notes(c, t, f, y + t.m.card_gap, heading, &points)
 }
 
 /// What a partition holds, as its row and page name it: the data

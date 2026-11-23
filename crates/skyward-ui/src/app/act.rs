@@ -653,6 +653,14 @@ impl App {
                 self.state.image_to_drive = drive;
                 self.refresh();
             }
+            Action::ReadAvb => {
+                self.state.avb = None;
+                self.refresh();
+                return vec![Effect::ReadAvb];
+            }
+            Action::ToggleAvb(check) => return self.toggle_avb(check, now),
+            Action::BackupVbmeta => return self.backup_vbmeta(now),
+            Action::RestoreVbmeta => return self.restore_vbmeta(now),
             Action::Unavailable(text) => self.say(text, now),
         }
         Vec::new()
@@ -787,6 +795,47 @@ impl App {
             self.refresh();
         }
         Vec::new()
+    }
+
+    /// Turn one AVB check off or on, saying so on the page while it is written.
+    fn toggle_avb(&mut self, check: AvbCheck, now: u64) -> Vec<Effect> {
+        let Some(Ok(state)) = &self.state.avb else { return Vec::new() };
+        if state.unlocked != Some(true) {
+            return Vec::new();
+        }
+        let (verity, verification) = (state.verity, state.verification);
+        let on = match check {
+            AvbCheck::Verity => !verity,
+            AvbCheck::Verification => !verification,
+        };
+        self.state.avb = Some(Ok(AvbInfo { verity: match check { AvbCheck::Verity => on, AvbCheck::Verification => verity }, verification: match check { AvbCheck::Verification => on, AvbCheck::Verity => verification }, ..state.clone() }));
+        self.avb_started(check);
+        let _ = now;
+        vec![Effect::ToggleAvb(check)]
+    }
+
+    /// Save the running slot's vbmeta image, saying so while it is written.
+    fn backup_vbmeta(&mut self, now: u64) -> Vec<Effect> {
+        let Some(Ok(state)) = &self.state.avb else { return Vec::new() };
+        if state.unlocked != Some(true) {
+            return Vec::new();
+        }
+        self.state.avb_notice = Some(self.state.lang.pick(["正在备份 vbmeta…", "正在備份 vbmeta…", "Saving the vbmeta image…"]).to_string());
+        self.refresh();
+        let _ = now;
+        vec![Effect::BackupVbmeta]
+    }
+
+    /// Restore the saved vbmeta image, saying so while it is written.
+    fn restore_vbmeta(&mut self, now: u64) -> Vec<Effect> {
+        let Some(Ok(state)) = &self.state.avb else { return Vec::new() };
+        if state.unlocked != Some(true) || !state.backup {
+            return Vec::new();
+        }
+        self.state.avb_notice = Some(self.state.lang.pick(["正在恢复 vbmeta…", "正在還原 vbmeta…", "Restoring the vbmeta image…"]).to_string());
+        self.refresh();
+        let _ = now;
+        vec![Effect::RestoreVbmeta]
     }
 
     /// The row of the image page tapped: its swipe comes up over the page, and

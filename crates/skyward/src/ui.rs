@@ -41,7 +41,7 @@ use skyward_sys::sleep::{Sleeper, Slept};
 use skyward_sys::uevent;
 use skyward_systems::Who;
 use skyward_ui::app::{
-    App, Asked, BackupAt, BackupEnd, BackupEntry, BackupRefusal, ChargeMode, ChargeNow, ClashChoice, Data, DownloadEnd, Effect, EraseStop,
+    App, Asked, AvbCheck, BackupAt, BackupEnd, BackupEntry, BackupRefusal, ChargeMode, ChargeNow, ClashChoice, Data, DownloadEnd, Effect, EraseStop,
     FileKind, FileOp, FileRow, FileTask, FsAction, FsRow, Have, Held, ItemEnd, ItemState, JobEnd, Keys, MountFailure, Part, PartKind, PartStop,
     Place, RenameRefused, Screen, Shot, SkywardEnd, SkywardStage, Target, UsbDrive, UsbLink, Wipe, DATA_OPENING, DATA_PARTITION, DOWNLOADS,
     INSTALL_UNFINISHED, USB_DRIVE,
@@ -2946,6 +2946,38 @@ impl Pages<'_> {
             // The partitions an image can come from and the images kept are
             // both read here: the page shows them together, and one that
             // failed says so on its own list.
+            Effect::ReadAvb => self.app.set_avb(avb::read().map_err(|e| format!("{e:#}"))),
+            Effect::ToggleAvb(check) => {
+                let on = match check {
+                    AvbCheck::Verity => !self.app.state.avb.as_ref().and_then(|a| a.as_ref().ok()).is_some_and(|s| s.verity),
+                    AvbCheck::Verification => !self.app.state.avb.as_ref().and_then(|a| a.as_ref().ok()).is_some_and(|s| s.verification),
+                };
+                let done = avb::set(match check { AvbCheck::Verity => skyward_vab::avb::Check::Verity, AvbCheck::Verification => skyward_vab::avb::Check::Verification }, on).map_err(|e| format!("{e:#}"));
+                self.app.set_avb(avb::read().map_err(|e| format!("{e:#}")));
+                let said = match done {
+                    Ok(()) => self.app.state.lang.pick(["已改好。", "已改好。", "Done."]).to_string(),
+                    Err(why) => why,
+                };
+                self.app.avb_ended(said, now);
+            }
+            Effect::BackupVbmeta => {
+                let done = avb::backup().map_err(|e| format!("{e:#}"));
+                let said = match done {
+                    Ok(()) => self.app.state.lang.pick(["已保存 vbmeta。", "已儲存 vbmeta。", "The vbmeta image is saved."]).to_string(),
+                    Err(why) => why,
+                };
+                self.app.set_avb(avb::read().map_err(|e| format!("{e:#}")));
+                self.app.avb_ended(said, now);
+            }
+            Effect::RestoreVbmeta => {
+                let done = avb::restore().map_err(|e| format!("{e:#}"));
+                let said = match done {
+                    Ok(()) => self.app.state.lang.pick(["已恢复 vbmeta。", "已還原 vbmeta。", "The vbmeta image is restored."]).to_string(),
+                    Err(why) => why,
+                };
+                self.app.set_avb(avb::read().map_err(|e| format!("{e:#}")));
+                self.app.avb_ended(said, now);
+            }
             Effect::ReadImages => {
                 let parts = images::parts("/dev/block/by-name").map(|parts| parts.into_iter().map(|p| ImagePart { name: p.name, size: p.size }).collect()).map_err(|e| format!("{e:#}"));
                 let kept = images::kept(&in_place(Place::Storage, images::FOLDER)).map_err(|e| format!("{e:#}"));

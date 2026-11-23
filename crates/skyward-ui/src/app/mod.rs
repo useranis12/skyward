@@ -34,6 +34,7 @@ use skyward_systems::{Overview, Who};
 use skyward_vab::{BootSlots, Hold, Slot, SnapshotState, Standing};
 
 mod act;
+mod avb;
 mod backup;
 mod charging;
 mod decrypt;
@@ -64,6 +65,7 @@ mod update;
 mod wipe;
 mod wlan;
 
+pub use avb::*;
 pub use backup::*;
 pub use charging::*;
 pub use decrypt::*;
@@ -143,6 +145,7 @@ pub enum Screen {
     ImageBackup,
     Tasks,
     PowerOff,
+    Avb,
     /// One of them: what it holds, and what to do to it, with a swipe to
     /// do it.
     Filesystem,
@@ -251,6 +254,14 @@ pub enum Confirm {
     /// Turning the phone off, and what is still going that turning it off
     /// would cut short.
     PowerOff,
+    /// Read the running slot's AVB state.
+    ReadAvb,
+    /// Turn one AVB check off or on.
+    ToggleAvb(AvbCheck),
+    /// Save the running slot's vbmeta image.
+    BackupVbmeta,
+    /// Restore the saved vbmeta image.
+    RestoreVbmeta,
 }
 
 /// What a control does when touched.
@@ -682,6 +693,18 @@ pub enum Effect {
     },
     /// Delete the image file at `path`.
     DeleteImage(String),
+    /// Read the running slot's AVB state, telling the page with
+    /// [`App::set_avb`].
+    ReadAvb,
+    /// Turn one AVB check off or on, telling how it went with
+    /// [`App::avb_ended`].
+    ToggleAvb(AvbCheck),
+    /// Save the running slot's vbmeta image, telling how it went with
+    /// [`App::avb_ended`].
+    BackupVbmeta,
+    /// Restore the saved vbmeta image, telling how it went with
+    /// [`App::avb_ended`].
+    RestoreVbmeta,
 }
 
 /// How far the lock's knob has to be dragged for the page behind it to show.

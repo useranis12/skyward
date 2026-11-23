@@ -290,6 +290,7 @@ impl App {
             Screen::Mount => vec![Effect::ReadMounts],
             Screen::Filesystems | Screen::Partitions => vec![Effect::ReadFilesystems],
             Screen::ImageBackup => vec![Effect::ReadImages],
+            Screen::Avb => vec![Effect::ReadAvb],
             Screen::Slot | Screen::Reboot => vec![Effect::ReadSlots],
             Screen::Systems => vec![Effect::ReadSystems],
             Screen::Restore => vec![self.find_backups()],

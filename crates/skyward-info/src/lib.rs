@@ -444,6 +444,38 @@ fn said_online(read: std::io::Result<String>) -> std::io::Result<bool> {
     }
 }
 
+/// Whether the bootloader is unlocked, from the first boot parameter this
+/// device provides.
+pub fn bootloader_unlocked() -> Result<Option<bool>> {
+    unlock_state(
+        skyward_block::boot_param("androidboot.flash.locked")?.as_deref(),
+        skyward_block::boot_param("androidboot.vbmeta.device_state")?.as_deref(),
+        skyward_block::boot_param("androidboot.verifiedbootstate")?.as_deref(),
+    )
+}
+
+fn unlock_state(flash_locked: Option<&str>, device_state: Option<&str>, verified: Option<&str>) -> Result<Option<bool>> {
+    if let Some(locked) = flash_locked {
+        return match locked {
+            "0" => Ok(Some(true)),
+            "1" => Ok(Some(false)),
+            other => bail!("androidboot.flash.locked {other:?}"),
+        };
+    }
+    if let Some(state) = device_state {
+        return match state {
+            "unlocked" => Ok(Some(true)),
+            "locked" => Ok(Some(false)),
+            other => bail!("androidboot.vbmeta.device_state {other:?}"),
+        };
+    }
+    Ok(match verified {
+        Some("orange") => Some(true),
+        Some("green" | "yellow") => Some(false),
+        _ => None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

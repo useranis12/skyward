@@ -276,6 +276,11 @@ pub struct State {
     /// The row of the image page whose swipe is showing: a partition to write
     /// out, or an image to write back or delete, chosen by tapping its row.
     pub image_asking: Option<Confirm>,
+    /// The running slot's AVB state, as the runtime last read it, or why it
+    /// could not.
+    pub avb: Option<Result<AvbInfo, String>>,
+    /// How an AVB change or backup ended.
+    pub avb_notice: Option<String>,
     /// Where an update the system installed stands, as the runtime last
     /// read it.
     pub update: Standing,
@@ -420,6 +425,8 @@ impl Default for State {
             image_to_drive: false,
             image_job: None,
             image_asking: None,
+            avb: None,
+            avb_notice: None,
             update: Standing::None,
             wlan: None,
             wlan_auto: false,

@@ -12,6 +12,7 @@ use skyward_ui::app::ChargeMode;
 use std::path::{Path, PathBuf};
 
 #[cfg(target_os = "android")]
+mod avb;
 mod backup;
 #[cfg(target_os = "android")]
 mod charge;

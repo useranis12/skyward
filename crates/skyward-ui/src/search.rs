@@ -73,6 +73,12 @@ pub const ENTRIES: &[Entry] = &[
         &["renwu", "rw", "task", "tasks", "jindu", "jd", "progress"],
     ),
     entry(
+        ["AVB 校验", "AVB 驗證", "AVB verification"],
+        ADVANCED,
+        Screen::Avb,
+        &["avb", "jiaoyan", "jy", "verity", "vbmeta", "dm-verity", "verification", "yanzheng"],
+    ),
+    entry(
         ["关机", "關機", "Power off"],
         ADVANCED,
         Screen::PowerOff,
