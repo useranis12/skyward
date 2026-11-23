@@ -2948,6 +2948,20 @@ impl Pages<'_> {
             // The partitions an image can come from and the images kept are
             // both read here: the page shows them together, and one that
             // failed says so on its own list.
+            Effect::ModuleInstall(path) => {
+                match install_module(&path) {
+                    Ok(id) => {
+                        skyward_sys::kmsg(&format!("the module {id} is in from {path}"))?;
+                        self.app.report(&format!("{id}: installed; it loads at the next start"), monotonic_ms());
+                    }
+                    Err(e) => {
+                        skyward_sys::kmsg(&format!("{path} is not installed as a module: {e}"))?;
+                        self.app.report(&format!("not installed: {e}"), monotonic_ms());
+                    }
+                }
+                let rows = read_modules();
+                self.app.set_modules(rows);
+            }
             Effect::ReadModules => {
                 let rows = read_modules();
                 self.app.set_modules(rows);

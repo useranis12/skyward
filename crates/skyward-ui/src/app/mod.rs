@@ -462,6 +462,8 @@ pub enum Action {
     ModuleRemove(usize),
     /// Search the modules.
     SearchModules,
+    /// Install the file the file page shows as a module.
+    InstallAsModule,
     /// A control whose work is not wired up yet; touching it says so.
     Unavailable(&'static str),
 }
@@ -727,6 +729,8 @@ pub enum Effect {
     ModuleSwitch(String, bool),
     /// Mark a module to be removed at the next start, or unmark it.
     ModuleRemove(String, bool),
+    /// Install a zip as a module, telling the page with [`App::set_modules`].
+    ModuleInstall(String),
 }
 
 /// How far the lock's knob has to be dragged for the page behind it to show.

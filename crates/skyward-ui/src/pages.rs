@@ -4301,6 +4301,12 @@ pub fn file_info(cx: &Ctx) -> Frame {
         rows.push(Row::new(l.pick(["编辑", "編輯", "Edit"])));
         acts.push(Action::EditEntry);
     }
+    // A zip can also be installed as a module: KSU's and Magisk's modules
+    // are packed this way, with a module.prop inside.
+    if e.kind == FileKind::File && e.name.to_lowercase().ends_with(".zip") {
+        rows.push(Row::new(l.pick(["作为模块安装", "當作模組安裝", "Install as module"])));
+        acts.push(Action::InstallAsModule);
+    }
     rows.extend([Row::new(l.pick(["复制", "複製", "Copy"])), Row::new(l.pick(["移动", "移動", "Move"])), Row::new(l.pick(RENAME))]);
     acts.extend([Action::PickEntry(FileOp::Copy), Action::PickEntry(FileOp::Move), Action::RenameEntry]);
     // A link's own permissions mean nothing; its target is changed where

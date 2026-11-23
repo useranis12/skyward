@@ -653,6 +653,18 @@ impl App {
                 self.state.image_to_drive = drive;
                 self.refresh();
             }
+            // A zip on the file page becomes a module: it must carry a
+            // module.prop for the phone to know what it is.
+            Action::InstallAsModule => {
+                let Some(e) = &self.state.file else { return Vec::new() };
+                let zip = e.name.to_lowercase().ends_with(".zip");
+                if e.kind != FileKind::File || !zip {
+                    self.say(l.pick(["只有 zip 能当模块安装", "只有 zip 能當模組安裝", "Only a zip can be a module"]), now);
+                    return Vec::new();
+                }
+                let path = std::path::Path::new(&self.state.files.path).join(&e.name).to_string_lossy().into_owned();
+                return vec![Effect::ModuleInstall(path)];
+            }
             Action::ModuleOpen(k) => {
                 self.state.module_at = Some(k);
                 self.open(Screen::ModuleInfo);
