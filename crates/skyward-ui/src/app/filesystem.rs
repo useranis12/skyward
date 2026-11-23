@@ -200,7 +200,7 @@ mod tests {
     fn the_filesystem_page_does_to_a_partition_what_is_chosen_and_reads_them_again_after() {
         let (f, i) = (fonts(), info());
         let mut app = App::new(Screen::Advanced, W, H, PPD);
-        assert_eq!(tap(&mut app, &f, &i, Action::Open(Screen::Filesystems)), vec![Effect::ReadFilesystems]);
+        assert_eq!(tap(&mut app, &f, &i, Action::Open(Screen::Partitions)), vec![Effect::ReadFilesystems]);
         app.set_filesystems(Ok(fs_rows()));
         tap(&mut app, &f, &i, Action::OpenFilesystem(2));
         assert_eq!(app.screen(), Screen::Filesystem);
@@ -228,7 +228,7 @@ mod tests {
     #[test]
     fn work_on_the_data_partition_waits_for_it_to_open_and_leaves_it_closed() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Filesystems, W, H, PPD);
+        let mut app = App::new(Screen::Partitions, W, H, PPD);
         app.set_filesystems(Ok(fs_rows()));
         tap(&mut app, &f, &i, Action::OpenFilesystem(0));
         tap(&mut app, &f, &i, Action::ChooseFs(FsChoice::Repair));

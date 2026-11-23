@@ -588,6 +588,27 @@ fn bring_up(cfg: &DeviceConfig, slot: skyward_vab::Slot, found: Result<keys::Fou
     for path in load_modules(cfg, &cfg.modules.load)? {
         skyward_sys::kmsg(&format!("loaded {}", path.display()))?;
     }
+    // The charge page reads everything through the ADSP, and a boot that asked
+    // for its firmware while the index under /odm was still being built left it
+    // down for good. The partitions are mounted and the modules are in by now,
+    // so this is the first moment asking again can work.
+    charge::raise_the_adsp();
+    // The WLAN's driver is started here, without waiting for its interface, so
+    // that the supplicant finds a driver ready when the page asks for the WLAN
+    // rather than one still making it. The driver takes some ten seconds to
+    // make its interface, and the page is answered well before that.
+    if let Some(w) = &cfg.wlan {
+        let modules = cfg
+            .modules
+            .sources
+            .iter()
+            .map(|source| skyward_modules::source_dir(source))
+            .collect::<Result<Vec<_>>>()?;
+        match wlan::warm_up(w, &modules) {
+            Ok(()) => skyward_sys::kmsg("the WLAN's driver is warmed for the page's asking")?,
+            Err(e) => skyward_sys::kmsg(&format!("the WLAN's driver is not warmed: {e:#}"))?,
+        }
+    }
     skyward_ui::progress::reached(skyward_ui::progress::DESCRIPTIONS);
     if !cfg.owners.is_empty() {
         let handed = hand_over(&cfg.owners)?;

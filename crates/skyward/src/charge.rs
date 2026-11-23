@@ -31,6 +31,7 @@
 
 use std::fs;
 use std::path::Path;
+use std::time::Duration;
 
 use skyward_ui::app::ChargeNow;
 
@@ -130,6 +131,31 @@ fn present(volts: Option<u64>, protocol: Option<&str>, cell_amps: Option<i64>, c
 /// The least current into the cell that is taken for a charge, in microamps:
 /// below it the phone is drawing on its battery rather than filling it.
 const CHARGING_UA: i64 = 300_000;
+
+/// Raise the ADSP where the boot left it down.
+///
+/// The processor is asked for its firmware from several threads as the drivers
+/// load, and one segment answered `ENOENT` stops the whole start:
+/// `qcom_q6v5_pas` logs `can't start rproc 3000000.remoteproc-adsp: -2` and
+/// never asks again. Everything the charge page reads comes through the ADSP's
+/// glink, so that boot then shows a phone on a charger as one charging at
+/// nothing: `usb_online` is never read, `real_type` stays at nothing, and no
+/// protocol is negotiated for the whole boot. Asking again is worth doing once
+/// the recovery's partitions are mounted and ueventd has built the index the
+/// firmware is found through, which is where this is called from. The asking
+/// only queues the start: the page's reading each second is what finds the
+/// processor up, so nothing here waits on it.
+pub fn raise_the_adsp() {
+    let raised = skyward_sys::remoteproc::ask("adsp", ADSP_GRACE);
+    // What it came to is worth having in the log either way: a boot that still
+    // charges at nothing is then known to be one whose ADSP stayed down.
+    let _ = skyward_sys::kmsg(&format!("the ADSP: {}", raised.said()));
+}
+
+/// How long a processor reading offline is given to finish a start already
+/// under way before it is asked again, in seconds. A load takes about half a
+/// second on this phone, and the boot's own ask happens seconds before this.
+const ADSP_GRACE: Duration = Duration::from_secs(2);
 
 fn read_node(dir: &str, name: &str) -> Option<String> {
     fs::read_to_string(Path::new(dir).join(name)).ok().map(|s| s.trim().to_owned())

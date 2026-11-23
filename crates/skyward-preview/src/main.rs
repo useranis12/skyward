@@ -636,8 +636,8 @@ fn main() -> Result<()> {
             let login = Reach::Login(Some("http://192.168.64.254:2060/redirect/?pip=192.168.72.76".into()));
             app.state.wlan = Some(joined(Joining::Connected(Link { reach: Some(login), ..router_link() })));
         }),
-        ("159-filesystems-light", Screen::Filesystems, false, &|app| app.set_filesystems(Ok(phone_filesystems(true)))),
-        ("160-filesystems-dark-closed", Screen::Filesystems, true, &|app| {
+        ("159-filesystems-light", Screen::Partitions, false, &|app| app.set_filesystems(Ok(phone_filesystems(true)))),
+        ("160-filesystems-dark-closed", Screen::Partitions, true, &|app| {
             app.state.data = Data::Closed;
             app.set_filesystems(Ok(phone_filesystems(false)));
         }),

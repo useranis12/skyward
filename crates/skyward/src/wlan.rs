@@ -637,6 +637,28 @@ impl Station {
     }
 }
 
+/// Put the driver's firmware and modules in and tell it it may start, without
+/// waiting for the interface. The recovery does this while its services come
+/// up: the driver takes some ten seconds to make its interface, and that time
+/// is better spent before the page asks for the WLAN than after it. A
+/// supplicant started right as the interface appears can be too early for the
+/// driver, which is what this buys.
+pub fn warm_up(cfg: &Config, modules: &[PathBuf]) -> Result<()> {
+    if Path::new("/sys/class/net").join(&cfg.interface).exists() {
+        return Ok(());
+    }
+    for file in &cfg.firmware {
+        place(file)?;
+    }
+    for path in skyward_modules::load(modules, &cfg.modules)? {
+        skyward_sys::kmsg(&format!("loaded {}", path.display()))?;
+    }
+    for w in &cfg.writes {
+        fs::write(&w.path, &w.value).with_context(|| format!("write {} to {}", w.value, w.path))?;
+    }
+    Ok(())
+}
+
 /// Load the driver where its interface is not there yet, and bring the
 /// interface up.
 fn bring_up(cfg: &Config, modules: &[PathBuf]) -> Result<()> {

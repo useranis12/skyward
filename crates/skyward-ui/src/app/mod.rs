@@ -142,8 +142,7 @@ pub enum Screen {
     /// how far it has come and how it ended.
     Relabel,
     /// The partitions whose filesystems can be repaired or made afresh as
-    /// another.
-    Filesystems,
+    /// another, and what can be done with each.
     Partitions,
     ImageBackup,
     Tasks,
@@ -821,6 +820,11 @@ enum Press {
     /// its track at `track` from `at` while the key is held; let go once
     /// it has slid far enough, the control confirms.
     Slide { which: Confirm, track: Rect, at: u64 },
+    /// The power key on no control, from `at`: let go, the panel goes dark;
+    /// held long enough, the reboot page opens over the page shown. `dark`
+    /// is set where the press only lit a dark panel, and does nothing more
+    /// as it comes up.
+    Sleep { at: u64, dark: bool },
     /// Done with: nothing more comes of it until it is let go.
     Spent,
 }
@@ -941,6 +945,11 @@ const CHORD_MS: u64 = 150;
 const SLID: f32 = 0.9;
 /// How long the power key held takes the knob the whole way along.
 const SLIDE_MS: u64 = 700;
+/// Two taps on the dark panel this close together light it, as on the phone's
+/// own system; a single one does nothing, so a stray touch in a pocket does
+/// not. The touchscreen's driver reports a wakeup key for its own double tap
+/// on some phones and not others, so the taps are counted here as well.
+const DOUBLE_TAP_MS: u64 = 600;
 /// The response, in seconds, of the spring the page scrolls on to show
 /// the control the keys moved to.
 const SEEK_PERIOD: f32 = 0.35;
@@ -1339,6 +1348,8 @@ pub struct App {
     /// When the panel last lit from dark, for the brief guard that keeps a
     /// stray touch or key from acting on a page just put up.
     woke_at: Option<u64>,
+    /// When the dark panel was last tapped, for the second tap that lights it.
+    tap_at: Option<u64>,
     /// The panel at full brightness, or easing to the dim level it takes
     /// shortly before going off.
     bright: Fade,
@@ -1437,6 +1448,7 @@ impl App {
             lock_rect: None,
             date: String::new(),
             display_on: true,
+            tap_at: None,
             active: None,
             woke_at: None,
             bright: full_brightness(),
@@ -1530,6 +1542,9 @@ impl App {
         let repeat = match self.button {
             Some((_, Press::Volume { next, .. })) => Some(next),
             Some((_, Press::Power { spot: Spot { stop: Stop::Hit(Action::OpenEntry(_)), .. }, at })) => Some(at + LONG_PRESS_MS),
+            // The power key on no control has to be woken at its long press
+            // too, or the lock's knob would never start moving.
+            Some((_, Press::Sleep { at, .. })) => Some(at + LONG_PRESS_MS),
             _ => None,
         };
         let blink = self.blink_at(now).filter(|_| self.display_on).map(|(_, next)| next);
@@ -1580,6 +1595,24 @@ impl App {
         {
             self.button = Some((key, Press::Spent));
             fx.extend(self.held_entry(i));
+        }
+        // The power key held on no control turns the screen off as it comes
+        // up; under the lock it slides the lock's knob along instead, since
+        // the reboot page a long press opens elsewhere is what the lock must
+        // not let through. The track only starts moving from this moment: the
+        // hold that got here was the ask, not the slide, or letting go would
+        // find the knob already at the end.
+        if let Some((key, Press::Sleep { at, dark })) = self.button
+            && now >= at + LONG_PRESS_MS
+        {
+            if self.lock.is_some() && !dark {
+                let track = self.lock_track();
+                self.state.confirm = 0.0;
+                self.button = Some((key, Press::Slide { which: Confirm::Unlock, track, at: now }));
+                self.dirty = true;
+            } else {
+                self.button = Some((key, Press::Spent));
+            }
         }
         let active = *self.active.get_or_insert(now);
         if let (true, Some(after)) = (self.display_on, SCREEN_OFF[self.state.screen_off]) {
@@ -1679,6 +1712,13 @@ impl App {
             let along = (now.saturating_sub(at) as f32 / SLIDE_MS as f32).min(1.0);
             if along != self.state.confirm {
                 self.state.confirm = along;
+                // The lock's knob is drawn by the lock, which reads the
+                // lock's own drag: both have to move or the knob stays put.
+                if which == Confirm::Unlock
+                    && let Some(lock) = &mut self.lock
+                {
+                    lock.drag = along;
+                }
                 self.knob = Some((which, track));
                 self.dirty = true;
             }

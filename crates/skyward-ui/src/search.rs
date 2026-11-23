@@ -56,7 +56,7 @@ pub const ENTRIES: &[Entry] = &[
         ["分区管理", "分割區管理", "Partitions"],
         ADVANCED,
         Screen::Partitions,
-        &["fenquguanli", "fqgl", "fenqu", "fq", "biao", "partition", "partitions", "size", "daxiao"],
+        &["fenquguanli", "fqgl", "fenqu", "fq", "biao", "partition", "partitions", "size", "daxiao", "wenjianxitong", "wjxt", "gh", "fsck", "filesystem", "f2fs", "ext4"],
     ),
     entry(
         ["镜像备份", "映像檔備份", "Partition images"],
@@ -105,7 +105,7 @@ pub const ENTRIES: &[Entry] = &[
     entry(
         ["文件系统", "檔案系統", "Filesystems"],
         ADVANCED,
-        Screen::Filesystems,
+        Screen::Partitions,
         &["wenjianxitong", "wjxt", "genghuan", "gh", "fsck", "filesystem", "f2fs", "ext4"],
     ),
     entry(["导出日志", "匯出記錄", "Export logs"], ADVANCED, Screen::Logs, &["daochurizhi", "dcrz", "rizhi", "rz", "logs", "dmesg"]),

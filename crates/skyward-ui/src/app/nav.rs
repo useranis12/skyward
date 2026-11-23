@@ -268,7 +268,7 @@ impl App {
         // changed what it holds.
         match self.screen() {
             Screen::Restore => fx.push(self.find_backups()),
-            Screen::Filesystem | Screen::Filesystems if left == Screen::PartWork => fx.push(Effect::ReadFilesystems),
+            Screen::Filesystem if left == Screen::PartWork => fx.push(Effect::ReadFilesystems),
             _ => {}
         }
         fx
@@ -288,7 +288,7 @@ impl App {
             // taking rather than what it was taking when last looked at.
             Screen::Charge => vec![Effect::ChargeWatch],
             Screen::Mount => vec![Effect::ReadMounts],
-            Screen::Filesystems | Screen::Partitions => vec![Effect::ReadFilesystems],
+            Screen::Partitions => vec![Effect::ReadFilesystems],
             Screen::ImageBackup => vec![Effect::ReadImages],
             Screen::Avb => vec![Effect::ReadAvb],
             Screen::Modules => vec![Effect::ReadModules],

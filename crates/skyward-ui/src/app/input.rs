@@ -5,11 +5,27 @@ use super::*;
 
 impl App {
     pub fn touch(&mut self, ev: Touch, f: &Fonts, now: u64) -> Vec<Effect> {
-        // A finger on the dark panel lights nothing, as on the phone's own
-        // system, where the power key lights it.
+        // Two taps on the dark panel light it, as on the phone's own system;
+        // a single one does nothing, so a stray touch in a pocket does not.
+        // The driver's own wakeup key covers the phones that report one, and
+        // this covers those that do not.
         if !self.display_on {
+            if matches!(ev, Touch::Down(..)) {
+                match self.tap_at {
+                    Some(at) if now.saturating_sub(at) <= DOUBLE_TAP_MS => {
+                        self.tap_at = None;
+                        if self.state.double_tap {
+                            self.wake(now);
+                        }
+                    }
+                    _ => self.tap_at = Some(now),
+                }
+            }
             return Vec::new();
         }
+        // A panel just lit by the second tap must not take the finger's lift
+        // for one on a page.
+        self.tap_at = None;
         // While the lock shows, only its knob answers: nothing a touch meant
         // for the page behind it reaches it.
         if self.lock.is_some() {
@@ -383,6 +399,12 @@ impl App {
     /// goes down first waits [`CHORD_MS`] for the other, or until it is let
     /// go, and then does what it does alone, as pressed when it went down.
     pub fn key(&mut self, key: Key, now: u64) -> Vec<Effect> {
+        // While the lock is over the page, only the power key reaches it: the
+        // volume keys would move the light on a page the lock is hiding, and
+        // the power key would work whatever that light came to rest on.
+        if self.lock.is_some() {
+            return self.locked_key(key, now);
+        }
         // Any button stops a gliding page, and brings a sliding one to rest.
         self.fling = None;
         self.end_turn();
@@ -449,6 +471,29 @@ impl App {
         }
     }
 
+    /// A button went down while the lock was over the page. The volume keys do
+    /// nothing at all. On a dark panel the power key lights it; on a lit one a
+    /// short press turns it off again, as a phone's does on its lock screen,
+    /// and a long press slides the lock's knob along: the reboot page a long
+    /// press opens elsewhere is exactly what the lock must not let through.
+    fn locked_key(&mut self, key: Key, now: u64) -> Vec<Effect> {
+        self.fling = None;
+        self.end_turn();
+        match (key, self.display_on) {
+            (Key::Power, false) => {
+                self.wake(now);
+                self.button = Some((key, Press::Sleep { at: now, dark: true }));
+            }
+            (Key::Power, true) => {
+                self.stir(now);
+                self.button = Some((key, Press::Sleep { at: now, dark: false }));
+            }
+            _ => self.button = Some((key, Press::Spent)),
+        }
+        self.dirty = true;
+        Vec::new()
+    }
+
     /// What a button that went down `at` does on its own, `now`: a key
     /// held is timed from when it went down, the screen goes off from now.
     fn key_down(&mut self, key: Key, at: u64, now: u64) -> Vec<Effect> {
@@ -477,12 +522,10 @@ impl App {
                         self.button = Some((key, Press::Slide { which, track: rect, at }))
                     }
                     Some(spot) => self.button = Some((key, Press::Power { spot, at })),
-                    // Turning the screen off, the key ticks the motor.
-                    None => {
-                        self.button = Some((key, Press::Spent));
-                        self.sleep(now);
-                        return vec![Effect::Ticks];
-                    }
+                    // On no control the key waits: let go, the screen goes
+                    // off ticking the motor; held long enough, the lock's
+                    // knob slides along.
+                    None => self.button = Some((key, Press::Sleep { at, dark: false })),
                 }
                 Vec::new()
             }
@@ -506,6 +549,15 @@ impl App {
         self.dirty = true;
         match press {
             Press::Power { spot, .. } => fx.extend(self.work(spot, now)),
+            // Let go short of a long press, the power key turns the screen
+            // off, ticking the motor. A press that only lit the panel does
+            // nothing more as it comes up.
+            Press::Sleep { dark, .. } => {
+                if !dark {
+                    self.sleep(now);
+                    fx.push(Effect::Ticks);
+                }
+            }
             Press::Slide { which, track, .. } => {
                 let done = self.state.confirm > SLID;
                 self.let_knob_go(which, track);
@@ -534,6 +586,13 @@ impl App {
     /// start of its track.
     fn let_knob_go(&mut self, which: Confirm, track: Rect) {
         self.state.confirm = 0.0;
+        // The lock draws its own knob from the lock's drag, so that has to go
+        // back with it.
+        if which == Confirm::Unlock
+            && let Some(lock) = &mut self.lock
+        {
+            lock.drag = 0.0;
+        }
         self.knob = Some((which, track));
         self.dirty = true;
     }

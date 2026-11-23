@@ -88,7 +88,6 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::Editor => editor(cx),
         Screen::Terminal => terminal(cx),
         Screen::Relabel => relabel(cx),
-        Screen::Filesystems => filesystems(cx),
         Screen::Partitions => partitions(cx),
         Screen::ImageBackup => image_backup(cx),
         Screen::Tasks => tasks(cx),
@@ -2498,7 +2497,6 @@ pub fn advanced(cx: &Ctx) -> Frame {
         Row::new(l.pick(AVB)).icon(GREEN, Icon::Shield),
         Row::new(l.pick(POWER_OFF)).icon(SLATE, Icon::Power),
         Row::new(l.pick(TASKS)).icon(BLUE, Icon::Layers),
-        Row::new(l.pick(FILESYSTEMS)).icon(RED, Icon::Mount),
         Row::new(l.pick(LOGS)).icon(ORANGE, Icon::Log),
         Row::new(l.pick(FETCH)).icon(BLUE, Icon::Layers),
         Row::new(l.pick(SERVE)).icon(GREEN, Icon::Globe),
@@ -2515,7 +2513,6 @@ pub fn advanced(cx: &Ctx) -> Frame {
         Action::Open(Screen::Avb),
         Action::Open(Screen::PowerOff),
         Action::Open(Screen::Tasks),
-        Action::Open(Screen::Filesystems),
         Action::Open(Screen::Logs),
         Action::Open(Screen::Fetch),
         Action::Open(Screen::Serve),
@@ -2527,7 +2524,6 @@ pub fn advanced(cx: &Ctx) -> Frame {
 }
 
 const RELABEL: Text = ["修复 SELinux 上下文", "修復 SELinux 上下文", "Fix SELinux contexts"];
-const FILESYSTEMS: Text = ["文件系统", "檔案系統", "Filesystems"];
 const PARTITIONS: Text = ["分区管理", "分割區管理", "Partitions"];
 const IMAGE_BACKUP: Text = ["镜像备份", "映像檔備份", "Image backup"];
 const TASKS: Text = ["任务", "任務", "Tasks"];
@@ -2646,35 +2642,6 @@ pub fn partitions(cx: &Ctx) -> Frame {
         }
     };
     Frame::new(t, fit(c, t, bottom), out, l.pick(PARTITIONS), top)
-}
-
-/// The partitions whose filesystems can be repaired or made afresh as
-/// another, each with what it holds and its size.
-pub fn filesystems(cx: &Ctx) -> Frame {
-    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
-    let mut c = long_page(cx);
-    let mut out = Vec::new();
-    let top = t.m.content_top;
-    let y = widgets::section_first(&mut c, t, f, top, l.pick(["分区", "分割區", "Partitions"]));
-    let bottom = match &s.filesystems {
-        None => widgets::list(&mut c, t, f, y, &[Row::new(l.pick(["正在读取分区", "正在讀取分割區", "Reading the partitions"])).trail(Trail::None)]).bottom,
-        Some(Err(why)) => {
-            let y = widgets::list(&mut c, t, f, y, &[Row::new(l.pick(["无法读取分区", "無法讀取分割區", "Couldn't read the partitions"])).trail(Trail::None)]).bottom;
-            widgets::footnote(&mut c, t, f, y, why)
-        }
-        Some(Ok(rows)) if rows.is_empty() => {
-            widgets::list(&mut c, t, f, y, &[Row::new(l.pick(["暂无可修复的分区", "沒有可修復的分割區", "No partitions to repair"])).trail(Trail::None)]).bottom
-        }
-        Some(Ok(rows)) => {
-            let subs: Vec<String> = rows.iter().map(|r| format!("{} · {}", fs_held(l, r, &s.data), fmt::bytes(r.size))).collect();
-            let shown: Vec<Row> = rows.iter().zip(&subs).map(|(r, sub)| Row::new(&r.name).subtitle(sub)).collect();
-            let list = widgets::list(&mut c, t, f, y, &shown);
-            out.extend(hits(&list.rows, &(0..rows.len()).map(Action::OpenFilesystem).collect::<Vec<_>>()));
-            let note = l.pick(["仅显示本机分区表中可格式化的分区。", "僅顯示本機分割區表中可格式化的分割區。", "Only the partitions in this phone's partition table that can be formatted show here."]);
-            widgets::footnote(&mut c, t, f, list.bottom, note)
-        }
-    };
-    Frame::new(t, fit(c, t, bottom), out, l.pick(FILESYSTEMS), top)
 }
 
 /// Partitions written out whole as image files, images written back over the
