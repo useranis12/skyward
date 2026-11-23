@@ -76,7 +76,6 @@ pub use frame::*;
 pub use image::*;
 pub use install::*;
 pub use manager::*;
-pub use modules::*;
 pub use mount::*;
 pub use prefs::*;
 pub use reboot::*;

@@ -1,5 +1,5 @@
 use crate::app::{
-    Action, AvbCheck, AvbInfo, BackupAt, BackupEnd, BackupJob, Check, ChargeMode, ClashChoice, Confirm, Damage, Data, Dock, DownloadEnd, EraseStop, Field,
+    Action, AvbCheck, BackupAt, BackupEnd, BackupJob, Check, ChargeMode, ClashChoice, Confirm, Damage, Data, Dock, DownloadEnd, EraseStop, Field,
     FileKind, FileOp, FileTask, Fetch, Fold, Folder, Frame, FsAction, FsChoice, FsRow, Have, HeroArt, Hit, ImageEnd, ImageFlow, ImageJob, Install, JobEnd, Keys, Pick,
     Place, Rows, Screen, Serving, SkywardCheck, SkywardEnd, SkywardJob, SkywardStage, Slider, Source, State, Switch, SystemsWork, Target,
     UsbDrive, UsbLink, Wipe, ADDABLE, BACKUP_PARTS, DATA_ERASED, DATA_PARTITION, DOWNLOADS, FASTBOOT_CHOICES, SCREEN_OFF, TARGETS,
@@ -218,7 +218,7 @@ fn fitted(t: &Theme, bottom: f32) -> u32 {
 fn screens_for(t: &Theme, top: f32, room: f32, rows: usize, row_h: f32) -> u32 {
     let h = top + room + row_h * rows as f32;
     (h / t.m.h as f32).ceil() as u32 + 1
-}/// How tall a long page whose content ends at `bottom` is: to the bottom
+}
 
 /// [`long_page`] for a page that may hold more rows than three screens: the
 /// sheet is `screens` screens tall, and [`fit`] trims it to the content. A
