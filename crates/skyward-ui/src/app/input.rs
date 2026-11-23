@@ -414,7 +414,7 @@ impl App {
         {
             return self.screenshot(key, now);
         }
-        let mut fx = self.let_chord_go(now);
+        let mut fx = self.let_chord_go();
         if !self.display_on {
             // The power key lights the dark panel, and does only that, as on
             // the phone's own system; the other keys leave it dark.
@@ -463,8 +463,8 @@ impl App {
     }
 
     /// The key waiting for its partner in a screenshot does what it does
-    /// alone `now`, as pressed when it went down.
-    pub(super) fn let_chord_go(&mut self, now: u64) -> Vec<Effect> {
+    /// alone, as pressed when it went down.
+    pub(super) fn let_chord_go(&mut self) -> Vec<Effect> {
         match self.chord.take() {
             Some((key, at)) => self.key_down(key, at),
             None => Vec::new(),
@@ -538,7 +538,7 @@ impl App {
     /// it does alone.
     pub fn key_up(&mut self, key: Key, now: u64) -> Vec<Effect> {
         let mut fx = match self.chord {
-            Some((first, _)) if first == key => self.let_chord_go(now),
+            Some((first, _)) if first == key => self.let_chord_go(),
             _ => Vec::new(),
         };
         let Some((down, press)) = self.button else { return fx };

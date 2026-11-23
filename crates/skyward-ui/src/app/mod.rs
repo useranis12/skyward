@@ -1579,7 +1579,7 @@ impl App {
         // The key waiting for its partner in a screenshot, left alone long
         // enough, does what it does alone.
         if self.chord.is_some_and(|(_, at)| now >= at + CHORD_MS) {
-            fx.extend(self.let_chord_go(now));
+            fx.extend(self.let_chord_go());
         }
         // An entry of the file manager held long enough, under a finger or
         // the power key, opens what can be done with it, a folder as much as
