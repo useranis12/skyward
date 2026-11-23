@@ -293,6 +293,7 @@ impl App {
             Screen::Avb => vec![Effect::ReadAvb],
             Screen::Modules => vec![Effect::ReadModules],
             Screen::DataApps => vec![Effect::ReadDataApps],
+            Screen::FilesOtg => vec![Effect::ReadOtg(self.state.otg.path.clone())],
             Screen::SystemApps => vec![Effect::ReadSystemApps],
             Screen::Slot | Screen::Reboot => vec![Effect::ReadSlots],
             Screen::Systems => vec![Effect::ReadSystems],

@@ -241,6 +241,11 @@ pub struct State {
     /// The key of the on-screen keyboard, or the choice of a list open over
     /// the page, a finger holds down.
     pub held: Option<Action>,
+    /// The folder the OTG page shows.
+    pub otg: Folder,
+    /// The entry the file page shows was opened on the OTG page, so its path
+    /// is measured from the top of the drive rather than the owner's storage.
+    pub file_on_drive: bool,
     /// The folder the file manager shows.
     pub files: Folder,
     /// The folder of internal storage a file to install is chosen in, its
@@ -442,6 +447,8 @@ impl Default for State {
             search: String::new(),
             layer: Layer::Letters,
             held: None,
+            otg: Folder::new(""),
+            file_on_drive: false,
             files: Folder::new("/"),
             storage: Folder::new(""),
             usb_drive: None,

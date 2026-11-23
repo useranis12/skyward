@@ -73,6 +73,12 @@ pub const ENTRIES: &[Entry] = &[
         &["renwu", "rw", "task", "tasks", "jindu", "jd", "progress"],
     ),
     entry(
+        ["U 盘", "USB 隨身碟", "USB drive"],
+        ADVANCED,
+        Screen::FilesOtg,
+        &["upan", "up", "usb", "otg", "youpan", "drive"],
+    ),
+    entry(
         ["应用", "應用程式", "Apps"],
         ADVANCED,
         Screen::DataApps,

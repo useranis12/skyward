@@ -291,6 +291,12 @@ impl App {
     /// The runtime listed a folder of `place` at `listed`, its path from
     /// the place's top, or could not: it becomes the folder shown to choose
     /// a file to install in, with what it holds that may be installed.
+    /// The OTG drive's folder was read: shown on its own page, every entry of
+    /// it, folders and files alike.
+    pub fn set_otg(&mut self, folder: String, files: Result<Vec<FileRow>, String>, listed: i64) {
+        self.show_folder(Screen::FilesOtg, folder, files, listed);
+    }
+
     pub fn set_place(&mut self, place: Place, folder: String, files: Result<Vec<FileRow>, String>, listed: i64) {
         let files = files.map(|entries| entries.into_iter().filter(installable).collect());
         self.show_folder(Screen::Choose(place), folder, files, listed);

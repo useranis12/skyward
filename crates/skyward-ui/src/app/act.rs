@@ -655,6 +655,30 @@ impl App {
             }
             // A zip on the file page becomes a module: it must carry a
             // module.prop for the phone to know what it is.
+            // The OTG drive's files: listed on a page of their own, and an
+            // entry of it opened to look inside or to open the file.
+            Action::FilesOtg => {
+                if self.state.place_open(Place::UsbDrive) {
+                    self.state.otg = Folder::new("");
+                    self.open(Screen::FilesOtg);
+                    return vec![Effect::ReadOtg(String::new())];
+                }
+                self.say(l.pick(["未连接 U 盘", "未連接 USB 隨身碟", "No USB drive"]), now);
+            }
+            Action::OpenOtgEntry(i) => {
+                let entry = self.state.otg.entry(i).clone();
+                match entry.kind {
+                    FileKind::Folder { .. } | FileKind::Link { folder: true, .. } => {
+                        self.state.otg.leave(self.top().1);
+                        return vec![Effect::ReadOtg(self.state.otg.inside(&entry.name))];
+                    }
+                    _ => {
+                        self.state.file_on_drive = true;
+                        self.state.file = Some(entry);
+                        self.open(Screen::FileInfo);
+                    }
+                }
+            }
             Action::DataAppOpen(k) => {
                 self.state.app_at = Some(k);
                 self.open(Screen::DataAppInfo);

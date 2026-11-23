@@ -98,6 +98,7 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::DataApps => data_apps(cx),
         Screen::SystemApps => system_apps(cx),
         Screen::DataAppInfo => data_app_info(cx),
+        Screen::FilesOtg => files_otg(cx),
         Screen::ModuleInfo => module_info(cx),
         Screen::Filesystem => filesystem(cx),
         Screen::PartWork => part_work(cx),
@@ -3553,6 +3554,37 @@ pub fn data_app_info(cx: &Ctx) -> Frame {
         widgets::footnote(&mut c, t, f, track.y + track.h, l.pick(["卸载会删掉它的安装目录和 /data/data 里的数据", "卸載會刪掉它的安裝目錄和 /data/data 裡的資料", "Uninstalling removes its folder and what it kept in /data/data"]))
     };
     Frame::new(t, fit(c, t, bottom), out, l.pick(DATA_APPS), top)
+}
+
+/// The file manager, every entry of the folder shown, folders first.
+/// The files on the OTG drive, all of them: folders and files alike.
+///
+/// An entry picked in the file manager is put down here from the bar held at
+/// the bottom, so a file on the phone is copied onto the drive.
+pub fn files_otg(cx: &Ctx) -> Frame {
+    let l = cx.state.lang;
+    let top = l.pick(["OTG", "OTG", "OTG"]);
+    let dock = cx.state.clip.as_ref().map(|clip| {
+        let go = l.pick(match clip.op {
+            FileOp::Copy => ["复制到此处", "複製到這裡", "Copy here"],
+            FileOp::Move => ["移动到此处", "移動到這裡", "Move here"],
+        });
+        let (canvas, rects) = widgets::dock_bar(cx.t, cx.f, files::page(cx.t), &[l.pick(CANCEL), go]);
+        Dock { canvas, hits: hits(&rects, &[Action::Unpick, Action::Paste]) }
+    });
+    let frame = listing(
+        cx,
+        &cx.state.otg,
+        top,
+        None,
+        l.pick(["U 盘为空", "USB 隨身碟是空的", "The drive is empty"]),
+        Action::OpenOtgEntry,
+        top,
+        None,
+        None,
+        Some((l.pick(["内部存储", "內部儲存空間", "Internal storage"]), Action::Open(Screen::Files))),
+    );
+    Frame { dock, ..frame }
 }
 
 /// What a partition holds, as its row and page name it: the data

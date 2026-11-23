@@ -2998,6 +2998,7 @@ impl Pages<'_> {
             // The partitions an image can come from and the images kept are
             // both read here: the page shows them together, and one that
             // failed says so on its own list.
+            Effect::ReadOtg(folder) => list_otg(&mut self.app, folder)?,
             Effect::ReadDataApps => {
                 self.app.set_apps_pending();
                 self.app_reader = Some(appread::Reader::start_data()?);
@@ -3731,4 +3732,13 @@ fn install_module(path: &str) -> Result<String, String> {
         let _ = std::fs::set_permissions(&at, std::fs::Permissions::from_mode(mode));
     }
     Ok(id)
+}
+
+/// Read a folder of `place` to choose a file to install in, as it is now;
+/// `folder` is its path from the place's top.
+/// Read the folder at `folder` on the OTG drive, for the page that shows it.
+fn list_otg(app: &mut App, folder: String) -> Result<()> {
+    let files = read_folder(&in_place(Place::UsbDrive, &folder)).map_err(|e| format!("{e:#}"));
+    app.set_otg(folder, files, unix_now()?);
+    Ok(())
 }

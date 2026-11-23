@@ -154,6 +154,7 @@ pub enum Screen {
     DataApps,
     SystemApps,
     DataAppInfo,
+    FilesOtg,
     /// One of them: what it holds, and what to do to it, with a swipe to
     /// do it.
     Filesystem,
@@ -479,6 +480,10 @@ pub enum Action {
     SysPage(usize),
     /// Search the apps.
     SearchApps,
+    /// Look at the files on the OTG drive.
+    FilesOtg,
+    /// Open the OTG entry at this place.
+    OpenOtgEntry(usize),
     /// A control whose work is not wired up yet; touching it says so.
     Unavailable(&'static str),
 }
@@ -746,6 +751,8 @@ pub enum Effect {
     ModuleRemove(String, bool),
     /// Install a zip as a module, telling the page with [`App::set_modules`].
     ModuleInstall(String),
+    /// Read the folder at this path on the OTG drive.
+    ReadOtg(String),
     /// Read the apps the owner installed.
     ReadDataApps,
     /// Read the apps the system's own partitions hold.
