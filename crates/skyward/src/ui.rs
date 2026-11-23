@@ -911,6 +911,14 @@ fn read_picture(app: &mut App) {
     }
 }
 
+/// Whether the file the name is kept in can be read. It sits on the data
+/// partition's device-encrypted half, which is open as soon as /data is
+/// mounted: no user's key is needed for it, so waiting for one leaves the name
+/// unread on a phone whose user never opens their own files.
+fn name_is_readable() -> bool {
+    Path::new("/data/system/users/0/settings_secure.xml").exists()
+}
+
 /// Read the name the phone gives itself. It is kept in the user's settings,
 /// which sit on the data partition's device-encrypted half: that half is open
 /// as soon as /data is mounted, whether or not the user's own files are.
@@ -1283,6 +1291,10 @@ struct Pages<'a> {
     servers: Servers,
     /// The WLAN, on a phone whose driver the recovery brings up.
     wlan: Option<wlan::Worker>,
+    /// The network asked for, with the password it was asked for with, until
+    /// the access point takes it: only a network that answered is kept, so a
+    /// password the access point refused is never written to the file.
+    wlan_trying: Option<(Vec<u8>, String)>,
     /// The network whose password is kept, and whether the WLAN has joined it.
     wlan_kept: wlanmem::Kept,
     /// The phone's own name is read once, as soon as the data partition is
@@ -1524,6 +1536,7 @@ impl<'a> Pages<'a> {
             wlan_kept: wlanmem::read(),
             name_read: false,
             account_read: false,
+            wlan_trying: None,
             wlan_joined: false,
             scanned_at: Instant::now(),
             fetcher: None,
@@ -2146,7 +2159,7 @@ impl Pages<'_> {
                     // opened, so they are read once, as soon as nothing of the
                     // user's is left closed: the home page shows them from then
                     // on, and the row it showed before until then.
-                    if !self.name_read && matches!(self.app.state.data, Data::Open) {
+                    if !self.name_read && name_is_readable() {
                         self.name_read = true;
                         read_name(&mut self.app);
                     }
@@ -2499,6 +2512,27 @@ impl Pages<'_> {
             self.portal_retry_at = None;
             self.app.set_portal(None);
         }
+        // A network that answered keeps the password it was joined with. The
+        // switches alone wrote the file before, so a network joined by hand was
+        // forgotten as soon as the recovery restarted.
+        if let Some((ssid, password)) = self.wlan_trying.clone()
+            && self.app.state.wlan.as_ref().is_some_and(|w| {
+                matches!(&w.joined, Some(j) if matches!(j.stage, Joining::Connected(_) | Joining::Addressing))
+            })
+        {
+            match wlanmem::save(&ssid, &password) {
+                Ok(()) => {
+                    let _ = skyward_sys::kmsg(&format!("the password for {} is kept", String::from_utf8_lossy(&ssid)));
+                    self.wlan_kept = wlanmem::read();
+                    self.app.state.wlan_keep = self.wlan_kept.keep;
+                    self.app.refresh();
+                }
+                Err(e) => {
+                    let _ = skyward_sys::kmsg(&format!("the password for {} is not kept: {e:#}", String::from_utf8_lossy(&ssid)));
+                }
+            }
+            self.wlan_trying = None;
+        }
         // The network kept, joined once the WLAN has it in view.
         if self.app.state.wlan_auto
             && !self.wlan_joined
@@ -2690,7 +2724,7 @@ impl Pages<'_> {
                 // opened, so they are read once, as soon as nothing of the
                 // user's is left closed: the home page shows them from then on,
                 // and the row it showed before until then.
-                if !self.name_read && matches!(self.app.state.data, Data::Open) {
+                if !self.name_read && name_is_readable() {
                     self.name_read = true;
                     read_name(&mut self.app);
                 }
@@ -2717,7 +2751,7 @@ impl Pages<'_> {
                 // opened, so they are read once, as soon as nothing of the
                 // user's is left closed: the home page shows them from then on,
                 // and the row it showed before until then.
-                if !self.name_read && matches!(self.app.state.data, Data::Open) {
+                if !self.name_read && name_is_readable() {
                     self.name_read = true;
                     read_name(&mut self.app);
                 }
@@ -3037,6 +3071,7 @@ impl Pages<'_> {
                 wlan_worker(&self.wlan)?.send(wlan::Command::Scan);
             }
             Effect::JoinWlan { ssid, name, security, password } => {
+                self.wlan_trying = Some((ssid.clone(), password.0.clone()));
                 wlan_worker(&self.wlan)?.send(wlan::Command::Join { ssid, name, security, password: password.0 })
             }
             Effect::LeaveWlan => wlan_worker(&self.wlan)?.send(wlan::Command::Leave),

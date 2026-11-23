@@ -280,16 +280,29 @@ impl Inputs {
         if writes.is_empty() {
             return;
         }
+        // A node that takes a command rather than a value is written once and
+        // left alone. It reads back something other than what was written to
+        // it -- `state:enabled` reads back as `enabled` -- so comparing what it
+        // reads against what was written would have it written every round,
+        // and each write to the double-tap node makes the controller switch
+        // its own mode: the panel then answers a finger with a checksum error,
+        // and after a while stops answering at all.
+        let (commands, plain): (Vec<Write>, Vec<Write>) = writes.into_iter().partition(|w| w.once);
+        for w in &commands {
+            if fs::write(&w.path, &w.value).is_ok() {
+                let _ = skyward_sys::kmsg(&format!("wrote {} to {} once for the touchscreen", w.value, w.path));
+            }
+        }
+        if plain.is_empty() {
+            return;
+        }
         let started = thread::Builder::new().name("touch".into()).spawn(move || {
             loop {
                 thread::sleep(TOUCH_REFRESH);
-                for w in &writes {
-                    // Written only where the node reads something else. Some
-                    // of these nodes make the controller switch its own mode
-                    // as they are written, and a write each second leaves it
-                    // switching mode each second, which cuts the finger's
-                    // reports short -- the panel then reports a checksum
-                    // error instead of a touch, and a tap never arrives.
+                for w in &plain {
+                    // Written only where the node reads something else: these
+                    // hold a value, and one that already reads what is wanted
+                    // is left alone.
                     if fs::read_to_string(&w.path).is_ok_and(|now| now.trim() == w.value.trim()) {
                         continue;
                     }

@@ -49,7 +49,12 @@ impl Readings {
         thread::Builder::new()
             .name("readings".into())
             .spawn(move || {
-                let mut ticks = 0u32;
+                // The first round takes all of them rather than waiting for
+                // the thirtieth: the pages open with what they show, and a
+                // reading taken before the data partition was mounted leaves
+                // the storage free, the slot and the system's own name blank
+                // for the half minute that follows.
+                let mut ticks = ALL_EVERY - 1;
                 loop {
                     let at_once = match asked.recv_timeout(BATTERY_EVERY) {
                         Ok(()) => {

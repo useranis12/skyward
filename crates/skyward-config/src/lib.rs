@@ -136,6 +136,13 @@ pub struct Wlan {
 pub struct Write {
     pub path: String,
     pub value: String,
+    /// Written once and never again. A node that takes a command rather than
+    /// a value reads back something else than what was written to it, so
+    /// writing it again on every round would have it acted on every round:
+    /// `state:enabled` reads back as `enabled`, and each write to the
+    /// double-tap node makes the controller switch its own mode.
+    #[serde(default)]
+    pub once: bool,
 }
 
 /// The partition holding the firmware images of a phone's processors and
@@ -777,7 +784,7 @@ mod tests {
         assert_eq!(cfg.modules.load, ["synaptics_tcm2"]);
         assert_eq!(
             cfg.touch.writes,
-            [Write { path: "/sys/class/touch/touch_dev/enable_touch_raw".into(), value: "0".into() }],
+            [Write { path: "/sys/class/touch/touch_dev/enable_touch_raw".into(), value: "0".into(), once: false }],
             "its controller reports positions itself"
         );
         assert_eq!(cfg.firmware, Some(FirmwarePartition { partition: "modem".into() }));
