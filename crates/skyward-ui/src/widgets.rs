@@ -1669,6 +1669,7 @@ pub fn device_card(c: &mut Canvas, t: &Theme, f: &Fonts, top: f32, title: &str, 
 /// owner where one has been read. The picture is laid over the card as it is:
 /// what it leaves clear is transparent, and the card shows through where the
 /// circle is not.
+#[allow(clippy::too_many_arguments)]
 pub fn device_card_with(
     c: &mut Canvas,
     t: &Theme,
