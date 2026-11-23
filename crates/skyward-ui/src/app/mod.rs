@@ -254,14 +254,6 @@ pub enum Confirm {
     /// Turning the phone off, and what is still going that turning it off
     /// would cut short.
     PowerOff,
-    /// Read the running slot's AVB state.
-    ReadAvb,
-    /// Turn one AVB check off or on.
-    ToggleAvb(AvbCheck),
-    /// Save the running slot's vbmeta image.
-    BackupVbmeta,
-    /// Restore the saved vbmeta image.
-    RestoreVbmeta,
 }
 
 /// What a control does when touched.
@@ -447,10 +439,18 @@ pub enum Action {
     DeleteImage(usize),
     /// Show the partitions an image can be taken from, or the images saved.
     ImageShows(bool),
+    /// Send an image to internal storage, or to a USB drive.
+    ImageTo(bool),
     /// Stop work on an image.
     StopImage,
-    /// Read the partitions an image can be taken from, and the images saved.
-    ReadImages,
+    /// Read the running slot's AVB state.
+    ReadAvb,
+    /// Turn one AVB check off or on.
+    ToggleAvb(AvbCheck),
+    /// Save the running slot's vbmeta image.
+    BackupVbmeta,
+    /// Restore the saved vbmeta image.
+    RestoreVbmeta,
     /// A control whose work is not wired up yet; touching it says so.
     Unavailable(&'static str),
 }
@@ -693,6 +693,10 @@ pub enum Effect {
     },
     /// Delete the image file at `path`.
     DeleteImage(String),
+    /// Stop work on an image.
+    StopImage,
+    /// Read the partitions an image can be taken from, and the images saved.
+    ReadImages,
     /// Read the running slot's AVB state, telling the page with
     /// [`App::set_avb`].
     ReadAvb,
