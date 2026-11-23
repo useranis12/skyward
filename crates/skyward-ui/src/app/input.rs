@@ -324,22 +324,27 @@ impl App {
     /// from now on.
     /// A finger on the lock: dragging the knob moves it, letting go past
     /// `UNLOCKED` uncovers the page, and anything else springs back.
+    ///
+    /// The finger has to come down on the knob itself: a touch anywhere else
+    /// on the lock reaches nothing, so that a hand brushing the panel does not
+    /// take the page up.
     fn lock_touch(&mut self, ev: Touch, now: u64) -> Vec<Effect> {
         match ev {
             Touch::Down(x, y) => {
                 // The knob's track is where the lock draws it; a lock not yet
-                // drawn still takes a finger there.
+                // drawn still takes a finger there. It is shorter than the page
+                // is wide and centred, as the lock draws it.
                 let track = self.lock_track.unwrap_or_else(|| {
                     let m = self.theme().m;
-                    Rect::new(m.margin, m.h as f32 - m.dp(150.0), m.w as f32 - m.margin * 2.0, m.dp(56.0))
+                    let wide = (m.w as f32 - m.margin * 2.0).min(m.dp(260.0));
+                    Rect::new((m.w as f32 - wide) / 2.0, m.h as f32 - m.dp(176.0), wide, m.dp(56.0))
                 });
                 {
+                    // Where the knob is now, which is what the finger has to
+                    // land on rather than the whole track.
                     let knob = track.x + (track.w - track.h) * self.unlock;
-                    let reach = track.h * 0.6;
-                    let on = x >= track.x - reach
-                        && x <= track.x + track.w + reach
-                        && y >= track.y - reach
-                        && y <= track.y + track.h + reach;
+                    let r = track.h / 2.0;
+                    let on = (x - (knob + r)).abs() <= r && (y - (track.y + r)).abs() <= r;
                     if on {
                         self.drag = Drag::Lock { track, grab: x - knob };
                     }

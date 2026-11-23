@@ -1795,8 +1795,18 @@ pub fn slider_card(c: &mut Canvas, t: &Theme, f: &Fonts, top: f32, caption: Capt
 /// is how far the knob has been dragged. Returns the track.
 pub fn confirm(c: &mut Canvas, t: &Theme, f: &Fonts, top: f32, label: &str, danger: bool, progress: f32) -> Rect {
     let m = &t.m;
+    let track = Rect::new(m.margin, top, m.w as f32 - m.margin * 2.0, m.dp(56.0));
+    confirm_in(c, t, f, track, label, danger, progress)
+}
+
+/// The same control drawn in `track` rather than across the page: a lock's
+/// knob is shorter than the screen is wide, and a caller that has already
+/// worked out where its finger has to land draws it there.
+pub fn confirm_in(c: &mut Canvas, t: &Theme, f: &Fonts, track: Rect, label: &str, danger: bool, progress: f32) -> Rect {
+    let m = &t.m;
     let accent = if danger { t.pal.danger } else { t.pal.accent };
-    let (x, w, h) = (m.margin, m.w as f32 - m.margin * 2.0, m.dp(56.0));
+    let (x, w, h) = (track.x, track.w, track.h);
+    let top = track.y;
     c.fill_round_rect(x, top, w, h, h / 2.0, if danger { t.pal.danger_soft } else { t.pal.badge });
     c.text_center(&f.heading, label, x + w / 2.0 + h / 4.0, top + h / 2.0, m.row_title_px, accent);
     let k = h - m.dp(8.0);

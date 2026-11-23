@@ -178,24 +178,52 @@ impl App {
         }
     }
 
-    /// The lock the panel woke to: the date over the time, what is left in
-    /// the battery under it, and the knob at the foot.
+    /// The lock the panel woke to: the date over the time, what the battery
+    /// holds and what it is taking under that, and the knob at the foot.
+    ///
+    /// The figures stand at fractions of the panel's height rather than at
+    /// fixed offsets, so that the time keeps its place on a phone whose panel
+    /// is not the one these were measured on.
     fn compose_lock(&mut self, out: &mut Canvas, f: &Fonts, info: &DeviceInfo, clock: &str, now: u64) {
         let t = self.theme();
-        let m = t.m;
+        let m = &t.m;
         let (w, h) = (m.w as f32, m.h as f32);
-        let ink = Rgba::rgb(255, 255, 255);
         out.fill_rect(0.0, 0.0, w, h, Rgba::rgb(6, 6, 8).with_alpha(226));
-        let x = w / 2.0;
+        // The date under which the time stands, as a phone's lock screen shows.
         if !self.date.is_empty() {
-            out.text_center(&f.body, &self.date, x, m.dp(190.0), m.dp(22.0), ink.with_alpha(224));
+            let px = m.dp(20.0);
+            let width = out.text_width(&f.body, &self.date, px);
+            out.text(&f.body, &self.date, (w - width) / 2.0, h * 0.245, px, Rgba::rgb(158, 162, 172), None);
         }
-        out.text_center(&f.heading, clock, x, m.dp(256.0), m.dp(88.0), ink);
-        if let Some((level, _)) = self.bar(clock, info).battery {
-            out.text_center(&f.body, &format!("{level}%"), x, m.dp(322.0), m.sub_px, ink.with_alpha(214));
+        if let Ok(face) = f.face(600.0) {
+            let px = m.dp(64.0);
+            let baseline = h * 0.335;
+            let width = out.text_width(&face, clock, px);
+            out.text(&face, clock, (w - width) / 2.0, baseline, px, Rgba::rgb(236, 238, 242), None);
         }
-        // The knob at the foot, in the style every other swipe-to-confirm in
-        // the recovery uses, easing back when a hand lets it go short.
+        if let Some(b) = info.battery.as_ref() {
+            // The level is always said, and while a cable is in, what it is
+            // taking: 85% · 充电中 · 18W.
+            let percent = format!("{}%", b.level);
+            let charging = self.state.lang.pick(["充电中", "充電中", "Charging"]);
+            let note = match b.plugged {
+                true => match b.watts() {
+                    Some(watts) => format!("{percent} · {charging} · {watts:.0}W"),
+                    None => format!("{percent} · {charging}"),
+                },
+                false => match b.watts() {
+                    Some(watts) => format!("{percent} · {watts:.0}W"),
+                    None => percent,
+                },
+            };
+            let px = m.dp(18.0);
+            let width = out.text_width(&f.body, &note, px);
+            out.text(&f.body, &note, (w - width) / 2.0, h * 0.375, px, Rgba::rgb(150, 154, 164), None);
+        }
+        // The knob at the foot, easing back when a hand lets it go short. Its
+        // track is shorter than the page is wide and centred: a control the
+        // whole width of the screen reads as a bar rather than something to
+        // slide.
         let along = match self.unlock_back {
             Some((at, from)) => {
                 let gone = (now.saturating_sub(at) as f32 / UNLOCK_BACK_MS as f32).clamp(0.0, 1.0);
@@ -203,9 +231,12 @@ impl App {
             }
             None => self.unlock,
         };
-        let label = self.state.lang.pick(["滑动解锁", "滑動解鎖", "Swipe to unlock"]);
-        let track = widgets::confirm(out, &t, f, h - m.dp(150.0), label, false, along);
-        self.lock_track = Some(track);
+        let label = self.state.lang.pick(["滑动解锁", "滑動解鎖", "Slide to unlock"]);
+        let wide = (w - m.margin * 2.0).min(m.dp(260.0));
+        let track = Rect::new((w - wide) / 2.0, h - m.dp(176.0), wide, m.dp(56.0));
+        // Drawn in the rect the finger has to land on, not one inset from it:
+        // the knob answered nowhere while these differed.
+        self.lock_track = Some(widgets::confirm_in(out, &t, f, track, label, false, along));
     }
 
     /// The charging screen, `level` of the way over the page drawn on `out`.
