@@ -67,6 +67,18 @@ pub const ENTRIES: &[Entry] = &[
         &["jingxiang", "jx", "image", "img", "export", "daochu", "fenqujingxiang"],
     ),
     entry(
+        ["任务", "任務", "Tasks"],
+        ADVANCED,
+        Screen::Tasks,
+        &["renwu", "rw", "task", "tasks", "jindu", "jd", "progress"],
+    ),
+    entry(
+        ["关机", "關機", "Power off"],
+        ADVANCED,
+        Screen::PowerOff,
+        &["guanji", "poweroff", "shutdown", "power", "off"],
+    ),
+    entry(
         ["文件系统", "檔案系統", "Filesystems"],
         ADVANCED,
         Screen::Filesystems,

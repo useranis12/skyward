@@ -856,6 +856,7 @@ impl App {
                 fx.extend(self.delete_image(k));
             }
             Confirm::Reboot => fx.push(Effect::Reboot(TARGETS[self.state.reboot])),
+            Confirm::PowerOff => fx.push(Effect::Reboot(Target::PowerOff)),
             Confirm::Wipe => {
                 let chosen: Vec<Wipe> = WIPES.iter().zip(self.state.wipe).filter(|(_, on)| *on).map(|(&w, _)| w).collect();
                 match chosen.is_empty() {

@@ -91,6 +91,8 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::Filesystems => filesystems(cx),
         Screen::Partitions => partitions(cx),
         Screen::ImageBackup => image_backup(cx),
+        Screen::Tasks => tasks(cx),
+        Screen::PowerOff => power_off(cx),
         Screen::Filesystem => filesystem(cx),
         Screen::PartWork => part_work(cx),
         Screen::Language => language(cx),
@@ -145,6 +147,7 @@ pub fn confirm_label(which: Confirm, s: &State) -> (&'static str, bool) {
         Confirm::ExportImage(_) => (["滑动以写入镜像", "滑動以寫入映像檔", "Slide to write the image"], true),
         Confirm::ImportImage(_) => (["滑动以写回镜像", "滑動以寫回映像檔", "Slide to write it back"], true),
         Confirm::DeleteImage(_) => (["滑动以删除", "滑動以刪除", "Slide to delete"], true),
+        Confirm::PowerOff => (["滑动以关机", "滑動以關機", "Slide to power off"], true),
     };
     (s.lang.pick(label), danger)
 }
@@ -2475,6 +2478,8 @@ pub fn advanced(cx: &Ctx) -> Frame {
         Row::new(l.pick(RELABEL)).icon(PURPLE, Icon::Shield),
         Row::new(l.pick(PARTITIONS)).icon(RED, Icon::Mount),
         Row::new(l.pick(IMAGE_BACKUP)).icon(BLUE, Icon::Backup),
+        Row::new(l.pick(POWER_OFF)).icon(SLATE, Icon::Power),
+        Row::new(l.pick(TASKS)).icon(BLUE, Icon::Layers),
         Row::new(l.pick(FILESYSTEMS)).icon(RED, Icon::Mount),
         Row::new(l.pick(LOGS)).icon(ORANGE, Icon::Log),
         Row::new(l.pick(FETCH)).icon(BLUE, Icon::Layers),
@@ -2487,6 +2492,8 @@ pub fn advanced(cx: &Ctx) -> Frame {
         Action::Open(Screen::Relabel),
         Action::Open(Screen::Partitions),
         Action::Open(Screen::ImageBackup),
+        Action::Open(Screen::PowerOff),
+        Action::Open(Screen::Tasks),
         Action::Open(Screen::Filesystems),
         Action::Open(Screen::Logs),
         Action::Open(Screen::Fetch),
@@ -2500,6 +2507,8 @@ const RELABEL: Text = ["修复 SELinux 上下文", "修復 SELinux 上下文", "
 const FILESYSTEMS: Text = ["文件系统", "檔案系統", "Filesystems"];
 const PARTITIONS: Text = ["分区管理", "分割區管理", "Partitions"];
 const IMAGE_BACKUP: Text = ["镜像备份", "映像檔備份", "Image backup"];
+const TASKS: Text = ["任务", "任務", "Tasks"];
+const POWER_OFF: Text = ["关机", "關機", "Power off"];
 const STOPPED: Text = ["已停止", "已停止", "Stopped"];
 const STOPPING: Text = ["正在停止", "正在停止", "Stopping"];
 
@@ -2897,6 +2906,186 @@ fn image_job_page(cx: &Ctx, job: &ImageJob) -> Frame {
         }
     };
     Frame::new(t, fit(c, t, y), out, l.pick(IMAGE_BACKUP), top)
+}
+
+/// The work going on now, and where each stands, with a row that opens the
+/// page it is shown on.
+///
+/// The work has pages of its own, and those pages are where it is watched:
+/// this page is the one place that says what is running at all, so nothing
+/// started and then left is forgotten behind a page that is no longer open.
+pub fn tasks(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let mut c = long_page(cx);
+    let mut out = Vec::new();
+    let top = t.m.content_top;
+    // Each row says what it is, where it stands, and which page shows it. The
+    // words are kept beside the rows so each subtitle outlives the row it is
+    // set in.
+    let mut said: Vec<String> = Vec::new();
+    let mut opens: Vec<Action> = Vec::new();
+    if !matches!(s.install, Install::Idle) {
+        said.push(install_stage(cx));
+        opens.push(Action::Open(Screen::Installing));
+    }
+    if let Some(job) = s.backup_job.as_ref() {
+        said.push(backup_stage(cx, job));
+        opens.push(Action::Open(Screen::BackupJob));
+    }
+    if let Some(job) = s.image_job.as_ref().filter(|j| j.outcome.is_none()) {
+        let share = match job.of {
+            0 => 0.0,
+            of => job.done.min(of) as f32 / of as f32,
+        };
+        said.push(format!("{} · {}%", job.partition, (share * 100.0).round() as u32));
+        opens.push(Action::Open(Screen::ImageBackup));
+    }
+    if s.job.is_some() {
+        said.push(l.pick(["正在复制、移动或删除", "正在複製、移動或刪除", "Copying, moving or deleting"]).to_string());
+        opens.push(Action::Open(Screen::Files));
+    }
+    if s.part_work.as_ref().is_some_and(|w| w.outcome.is_none()) {
+        said.push(l.pick(["正在处理分区", "正在處理分割區", "Working on a partition"]).to_string());
+        opens.push(Action::Open(Screen::PartWork));
+    }
+    if s.relabel.as_ref().is_some_and(|j| j.outcome.is_none()) {
+        said.push(l.pick(["正在写入文件标签", "正在寫入檔案標籤", "Writing the files' labels"]).to_string());
+        opens.push(Action::Open(Screen::Relabel));
+    }
+    if let Some(job) = s.download.as_ref().filter(|j| j.outcome.is_none()) {
+        said.push(match job.progress {
+            Some(Progress::Downloading { done, total }) => format!("{} / {}", fmt::bytes(done), fmt::bytes(total)),
+            Some(Progress::Checking { done, total }) => format!("{} / {}", fmt::bytes(done), fmt::bytes(total)),
+            None => l.pick(["正在连接", "正在連線", "Connecting"]).to_string(),
+        });
+        opens.push(Action::Open(Screen::Update));
+    }
+    let names: Vec<&str> = opens
+        .iter()
+        .map(|action| match action {
+            Action::Open(Screen::Installing) => l.pick(["安装", "安裝", "Install"]),
+            Action::Open(Screen::BackupJob) => l.pick(["备份或恢复", "備份或還原", "Backup or restore"]),
+            Action::Open(Screen::ImageBackup) => l.pick(IMAGE_BACKUP),
+            Action::Open(Screen::Files) => l.pick(["文件", "檔案", "Files"]),
+            Action::Open(Screen::PartWork) => l.pick(["分区", "分割區", "Partitions"]),
+            Action::Open(Screen::Relabel) => l.pick(RELABEL),
+            _ => l.pick(["下载", "下載", "Download"]),
+        })
+        .collect();
+    let rows: Vec<Row> = names.iter().zip(&said).map(|(name, said)| Row::new(name).subtitle(said).trail(Trail::Arrow)).collect();
+    let y = match rows.is_empty() {
+        true => {
+            let y = widgets::section_first(&mut c, t, f, top, l.pick(TASKS));
+            let note = l.pick(["现在没有正在进行的工作。", "現在沒有正在進行的工作。", "Nothing is running now."]);
+            widgets::footnote(&mut c, t, f, y, note)
+        }
+        false => {
+            let y = widgets::section_first(&mut c, t, f, top, l.pick(TASKS));
+            let list = widgets::list(&mut c, t, f, y, &rows);
+            out.extend(hits(&list.rows, &opens));
+            list.bottom
+        }
+    };
+    Frame::new(t, fit(c, t, y), out, l.pick(TASKS), top)
+}
+
+/// Where an install stands, in a few words.
+fn install_stage(cx: &Ctx) -> String {
+    let (s, l) = (cx.state, cx.state.lang);
+    match &s.install {
+        Install::Idle => String::new(),
+        Install::Starting => l.pick(["正在准备", "正在準備", "Getting ready"]).to_string(),
+        Install::Opening => l.pick(["正在打开数据分区", "正在開啟資料分割區", "Opening the data partition"]).to_string(),
+        Install::Locked(_) => l.pick(["等待解锁", "等待解鎖", "Waiting for the lock"]).to_string(),
+        Install::Waiting => l.pick(["等待选择安装包", "等待選擇安裝檔", "Waiting for a package"]).to_string(),
+        Install::Checking { .. } => l.pick(["正在检查安装包", "正在檢查安裝檔", "Checking the package"]).to_string(),
+        Install::Choosing(_) | Install::Confirming { .. } | Install::ConfirmingScript => l.pick(["等待确认", "等待確認", "Waiting to be agreed to"]).to_string(),
+        Install::Updating { .. } => l.pick(["正在安装系统更新", "正在安裝系統更新", "Installing the update"]).to_string(),
+        Install::Flashing { .. } => l.pick(["正在刷入分区镜像", "正在刷入分割區映像檔", "Flashing an image"]).to_string(),
+        Install::Scripting { .. } => l.pick(["正在运行安装脚本", "正在執行安裝指令碼", "Running the install script"]).to_string(),
+        _ => l.pick(["正在进行", "正在進行", "Under way"]).to_string(),
+    }
+}
+
+/// Where a backup or restore stands, in a few words.
+fn backup_stage(cx: &Ctx, job: &BackupJob) -> String {
+    let l = cx.state.lang;
+    match &job.outcome {
+        Some(_) => l.pick(["已完成", "已完成", "Done"]).to_string(),
+        None => match &job.at {
+            Some(at) => {
+                let share = match at.of {
+                    0 => 0.0,
+                    of => at.done.min(of) as f32 / of as f32,
+                };
+                let part = job.plan.get(at.item).map(|(name, _)| name.as_str()).unwrap_or("");
+                format!("{part} · {}%", (share * 100.0).round() as u32)
+            }
+            None => l.pick(["正在进行", "正在進行", "Under way"]).to_string(),
+        },
+    }
+}
+
+/// Turning the phone off: what is still going that turning it off would cut
+/// short, and a swipe to turn it off.
+///
+/// A page of its own rather than a choice on the reboot page: a phone is
+/// turned off at the end of a session, and the work that a session leaves
+/// running -- an install, a backup, an image being written -- is what a
+/// swipe here would cut in half.
+pub fn power_off(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let mut c = page(cx);
+    let mut out = Vec::new();
+    let top = t.m.content_top;
+    // The work that would be cut short, named as its own page names it.
+    let mut going: Vec<&'static str> = Vec::new();
+    if !matches!(s.install, Install::Idle) {
+        going.push(l.pick(["安装", "安裝", "An install"]));
+    }
+    if s.backup_job.as_ref().is_some_and(|j| j.outcome.is_none()) {
+        going.push(l.pick(["备份或恢复", "備份或還原", "A backup or restore"]));
+    }
+    if s.image_job.as_ref().is_some_and(|job| job.outcome.is_none()) {
+        going.push(l.pick(["镜像的写入", "映像檔的寫入", "An image being written"]));
+    }
+    if s.job.is_some() {
+        going.push(l.pick(["复制或删除文件", "複製或刪除檔案", "Files being copied or deleted"]));
+    }
+    if s.part_work.as_ref().is_some_and(|w| w.outcome.is_none()) {
+        going.push(l.pick(["分区上的操作", "分割區上的操作", "Work on a partition"]));
+    }
+    if s.relabel.as_ref().is_some_and(|job| job.outcome.is_none()) {
+        going.push(l.pick(["写入文件标签", "寫入檔案標籤", "Files being relabelled"]));
+    }
+    let y = match going.is_empty() {
+        true => {
+            let y = widgets::section_first(&mut c, t, f, top, l.pick(["关机", "關機", "Power off"]));
+            let note = l.pick([
+                "关机后手机将完全断电。按电源键可以重新开机，开机后直接进入系统。",
+                "關機後手機將完全斷電。按電源鍵可以重新開機，開機後直接進入系統。",
+                "The phone goes fully off. The power key turns it back on, into the system.",
+            ]);
+            widgets::footnote(&mut c, t, f, y, note)
+        }
+        false => {
+            // The work is said first: a phone turned off halfway through an
+            // install is a phone that may not start again.
+            let y = widgets::section_first(&mut c, t, f, top, l.pick(["正在进行", "正在進行", "Still going"]));
+            let rows: Vec<Row> = going.iter().map(|what| Row::new(what).tint(t.pal.danger)).collect();
+            let list = widgets::list(&mut c, t, f, y, &rows);
+            let note = l.pick([
+                "关机将中断这些操作，未完成的部分可能让手机无法正常启动。请先返回等待它们完成。",
+                "關機將中斷這些操作，未完成的部分可能讓手機無法正常啟動。請先返回等待它們完成。",
+                "Turning the phone off cuts these short, and what is left half done may keep it from starting. Go back and let them finish.",
+            ]);
+            widgets::footnote(&mut c, t, f, list.bottom, note)
+        }
+    };
+    let (label, danger) = confirm_label(Confirm::PowerOff, s);
+    let track = widgets::confirm(&mut c, t, f, y + t.m.dp(28.0), label, danger, s.confirm);
+    out.push(Hit { rect: track, action: Action::Confirm(Confirm::PowerOff) });
+    Frame::new(t, c, out, l.pick(POWER_OFF), top)
 }
 
 /// What a partition holds, as its row and page name it: the data

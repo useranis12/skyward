@@ -141,6 +141,8 @@ pub enum Screen {
     Filesystems,
     Partitions,
     ImageBackup,
+    Tasks,
+    PowerOff,
     /// One of them: what it holds, and what to do to it, with a swipe to
     /// do it.
     Filesystem,
@@ -246,6 +248,9 @@ pub enum Confirm {
     ImportImage(usize),
     /// Delete the image at this row.
     DeleteImage(usize),
+    /// Turning the phone off, and what is still going that turning it off
+    /// would cut short.
+    PowerOff,
 }
 
 /// What a control does when touched.
