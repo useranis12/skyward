@@ -305,6 +305,14 @@ pub fn home(cx: &Ctx) -> Frame {
         rows.push(Row::new(l.pick(WLAN)).icon(BLUE, Icon::Wlan).trail(Trail::Value(fmt::wlan_value(l, w))));
         opens.push(Action::Open(Screen::Wlan));
     }
+    // The modules go on right under the file manager: putting a module in is
+    // putting files into data, and that is where a hand is already reaching.
+    rows.push(Row::new(l.pick(MODULES)).icon(BLUE, Icon::Layers));
+    opens.push(Action::Open(Screen::Modules));
+    // The apps go under the modules: both are what the data partition holds,
+    // one a module and one an app.
+    rows.push(Row::new(l.pick(DATA_APPS)).icon(PURPLE, Icon::Layers));
+    opens.push(Action::Open(Screen::DataApps));
     let starts = systems_value(cx);
     if cx.state.offers(Screen::Systems) {
         let row = Row::new(l.pick(DUAL_BOOT)).icon(PURPLE, Icon::Systems);
@@ -2495,6 +2503,8 @@ pub fn advanced(cx: &Ctx) -> Frame {
         Row::new(l.pick(FETCH)).icon(BLUE, Icon::Layers),
         Row::new(l.pick(SERVE)).icon(GREEN, Icon::Globe),
         Row::new(l.pick(UPDATE)).icon(GREEN, Icon::Layers).trail(Trail::Value(update_value(cx))),
+        Row::new(l.pick(MODULES)).icon(BLUE, Icon::Layers),
+        Row::new(l.pick(DATA_APPS)).icon(PURPLE, Icon::Layers),
     ]);
     let out = hits(&tools.rows, &[
         Action::Open(Screen::Files),
@@ -2510,6 +2520,8 @@ pub fn advanced(cx: &Ctx) -> Frame {
         Action::Open(Screen::Fetch),
         Action::Open(Screen::Serve),
         Action::Open(Screen::Update),
+        Action::Open(Screen::Modules),
+        Action::Open(Screen::DataApps),
     ]);
     Frame::new(t, c, out, l.pick(ADVANCED), top)
 }
