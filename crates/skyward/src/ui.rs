@@ -911,6 +911,18 @@ fn read_picture(app: &mut App) {
     }
 }
 
+/// Tell the touchscreen to keep watching for a tap while the panel is dark.
+/// The controller puts these nodes back to their power-up state at sleep, so
+/// they are said after the panel has gone off; saying them while it is lit
+/// switches the controller into gesture, where it answers no finger at all.
+fn tell_dark(cfg: &DeviceConfig) {
+    for w in &cfg.touch.dark {
+        if fs::write(&w.path, &w.value).is_ok() {
+            let _ = skyward_sys::kmsg(&format!("wrote {} to {} while the panel is dark", w.value.trim(), w.path));
+        }
+    }
+}
+
 /// Whether the file the name is kept in can be read. It sits on the data
 /// partition's device-encrypted half, which is open as soon as /data is
 /// mounted: no user's key is needed for it, so waiting for one leaves the name
@@ -1914,6 +1926,11 @@ impl<'a> Pages<'a> {
             // that lights from it quickly enough to be noticed. This one does
             // not: coming back from off is what the phone's own system does.
             self.surface.turn_off()?;
+            // Only now, with the panel dark, is the controller told to keep
+            // watching for a tap. It resets these nodes at sleep, and a write
+            // to either while the panel is lit switches it into gesture, where
+            // it answers no finger at all until the phone restarts.
+            tell_dark(self.cfg);
         }
         Ok((panel.is_some(), shown))
     }

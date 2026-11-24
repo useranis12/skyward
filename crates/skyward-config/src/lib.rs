@@ -361,6 +361,16 @@ pub struct Touch {
     /// step of starting the controller.
     #[serde(default)]
     pub writes: Vec<Write>,
+    /// What is written while the panel is dark, and nothing else: the
+    /// double tap and the always-on display are told so at sleep, so the
+    /// controller keeps watching for a tap with the backlight off.
+    ///
+    /// They are kept out of `writes` on purpose. Those are written on a timer,
+    /// and a write to either node makes the controller switch its own mode to
+    /// gesture: lit again, it stays there and answers no finger at all -- not
+    /// a tap, not a drag -- until the phone restarts.
+    #[serde(default)]
+    pub dark: Vec<Write>,
     /// Whether two taps on the dark panel light it, as the phone's own
     /// system's double tap does. The panel has to keep reporting taps while
     /// its backlight is off; a controller that stops reporting them at sleep

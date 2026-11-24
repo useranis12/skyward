@@ -20,20 +20,22 @@ sources = ["vendor_boot", "vendor_dlkm", "vendor", "system_dlkm"]
 load = ["goodix_core", "xiaomi_touch", "stm_nfc_i2c", "nxp-nci"]
 
 [touch]
-# The double-tap node is what keeps the panel's controller awake while the
-# screen is dark. Without it the controller stops with the panel, and a tap on
-# a dark screen never reaches the recovery at all: the log shows no finger
-# report at all across a dark stretch, and the gesture type read back as 0.
-# With it, the controller keeps watching, and the two taps are counted here.
+# Only the raw-touch switch is written here, and on the timer that keeps the
+# touch nodes told: it holds a value, and one that already reads what is
+# wanted is left alone.
+writes = [{ path = "/sys/class/touch/touch_dev/enable_touch_raw", value = "0" }]
+
+# The double tap, said only while the panel is dark. The driver puts it back
+# to its power-up state at sleep, so it is said after the panel has gone off;
+# and a write to it while the panel is lit switches the controller into
+# gesture, where it answers no finger at all until the phone restarts -- no
+# tap, no drag, nothing. That is what left the touchscreen dead after the
+# first time the screen went out.
 #
-# Writing the node makes the controller switch its own mode, so the thread
-# that keeps these written reads each one first and writes only where it reads
-# something else. Writing them once a second regardless left the controller
-# switching mode once a second, which cut every finger report short.
-writes = [
-    { path = "/sys/class/touch/touch_dev/enable_touch_raw", value = "0" },
-    { path = "/sys/devices/platform/goodix_ts.0/double_tap_enable", value = "state:enabled\n" },
-]
+# The always-on display is left alone: it is not a feature here, and telling
+# the controller to keep a picture up while the panel is off is what leaves a
+# faint glow on a screen that should be black.
+dark = [{ path = "/sys/devices/platform/goodix_ts.0/double_tap_enable", value = "state:enabled\n" }]
 
 
 # Stage the shared libraries the key services ask for that the recovery's
