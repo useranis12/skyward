@@ -5,7 +5,7 @@
 //! a time zone, a part or a place by its name, so a later version that lists
 //! them otherwise reads them the same.
 
-use crate::app::{ChargeMode, Place, State, SCREEN_OFF, THERMAL_LIMIT_LEAST, THERMAL_LIMIT_MOST, TIME_ZONES};
+use crate::app::{ChargeMode, Place, State, Via, SCREEN_OFF, THERMAL_LIMIT_LEAST, THERMAL_LIMIT_MOST, TIME_ZONES};
 use crate::Lang;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -27,6 +27,13 @@ const LOG_PLACES: [&str; 2] = ["temporary", "storage"];
 /// A setting that is on unless the file kept from before says otherwise.
 fn yes() -> bool {
     true
+}
+
+/// Where a new version is looked for first when the file kept from before
+/// does not say: the accelerators, which answer fastest where GitHub is
+/// slow, with GitHub's own addresses after them either way.
+fn accelerator() -> String {
+    Via::Accelerator.name().to_string()
 }
 
 /// The settings as they are kept. A value missing is the one a recovery
@@ -69,6 +76,10 @@ pub struct Settings {
     /// how warm is too warm in whole degrees Celsius.
     pub thermal_guard: bool,
     pub thermal_limit: u8,
+    /// Where a new version of Skyward is looked for first, by name: direct,
+    /// or the accelerators.
+    #[serde(default = "accelerator")]
+    pub update_via: String,
     pub install: Install,
     pub backup: Backup,
     pub logs: Logs,
@@ -151,6 +162,7 @@ impl Settings {
             charge_mode: state.charge_mode.name().to_string(),
             thermal_guard: state.thermal_guard,
             thermal_limit: state.thermal_limit,
+            update_via: state.skyward_via.name().to_string(),
             install: Install { check_signature: state.check_signature, keep_recovery: state.keep_recovery },
             backup: Backup {
                 parts: names(&state.backup, &PARTS),
@@ -219,6 +231,11 @@ impl Settings {
         // something else, or by a version whose span was wider: it is brought
         // inside rather than left to say a temperature the page cannot show.
         state.thermal_limit = self.thermal_limit.clamp(THERMAL_LIMIT_LEAST, THERMAL_LIMIT_MOST);
+        // A choice this version does not have leaves the state as it is,
+        // as a time zone or a part outside the page's list does.
+        if let Some(via) = Via::named(&self.update_via) {
+            state.skyward_via = via;
+        }
         state.check_signature = self.install.check_signature;
         state.keep_recovery = self.install.keep_recovery;
         state.backup = picked(&self.backup.parts, &PARTS);
@@ -411,6 +428,32 @@ mod tests {
         assert!(!state.language_chosen);
         assert_eq!(state.backup, [true, false, false, false], "a part this version has not is left out");
         assert_eq!(state.logs, [false, true]);
+    }
+
+    #[test]
+    fn where_a_new_version_is_looked_for_first_is_kept_by_the_name_it_means() {
+        let mut state = State::default();
+        state.skyward_via = Via::Direct;
+        let text = Settings::of(&state).text();
+        assert!(text.contains("\"update_via\": \"direct\""), "as what it means, not as a flag: {text}");
+
+        let mut back = State::default();
+        Settings::read(&text).unwrap().apply(&mut back);
+        assert_eq!(back.skyward_via, Via::Direct);
+
+        // A choice this version does not have leaves the state as it is,
+        // as a time zone outside the page's list does.
+        let mut kept = State::default();
+        kept.skyward_via = Via::Direct;
+        Settings { update_via: "satellite".into(), ..Settings::of(&kept) }.apply(&mut kept);
+        assert_eq!(kept.skyward_via, Via::Direct, "an unknown choice is not obeyed");
+
+        // And a file that does not say is the choice a recovery starts with,
+        // which is the accelerators: they answer fastest where GitHub is slow,
+        // and GitHub's own addresses follow them either way.
+        assert_eq!(Settings::read("{}").unwrap().update_via, Via::Accelerator.name());
+        assert_eq!(Via::named(Via::Accelerator.name()), Some(Via::Accelerator));
+        assert_eq!(Via::named("satellite"), None);
     }
 
     #[test]

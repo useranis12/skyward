@@ -85,6 +85,41 @@ impl ChargeMode {
     }
 }
 
+/// Where a new version of Skyward is looked for first: the release's own
+/// addresses, or the accelerators in front of them.
+///
+/// Either way the rest still follow, so a source that will not answer is
+/// not the end of it, and whatever comes down is checked against the
+/// SHA-256 GitHub publishes for it either way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Via {
+    /// GitHub's own addresses: the short-lived one the API hands out, then
+    /// the release's link.
+    Direct,
+    /// The accelerators, with GitHub's addresses after them.
+    #[default]
+    Accelerator,
+}
+
+impl Via {
+    /// The choices, in the order the page offers them.
+    pub const ALL: [Via; 2] = [Via::Direct, Via::Accelerator];
+
+    /// The name it is kept by in the settings file, so a later version that
+    /// lists the choices otherwise reads it the same.
+    pub fn name(self) -> &'static str {
+        match self {
+            Via::Direct => "direct",
+            Via::Accelerator => "accelerator",
+        }
+    }
+
+    /// The choice a settings file names, where it names one this version has.
+    pub fn named(name: &str) -> Option<Via> {
+        Via::ALL.into_iter().find(|via| via.name() == name)
+    }
+}
+
 /// One module the phone's own system loads, as the modules page lists it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModuleRow {
@@ -389,6 +424,10 @@ pub struct State {
     /// nor obeyed there.
     pub thermal_guard: bool,
     pub thermal_limit: u8,
+    /// Where a new version of Skyward is looked for first: the release's
+    /// own addresses, or the accelerators in front of them. The choice is
+    /// on the update page, and kept between starts.
+    pub skyward_via: Via,
 }
 
 impl Default for State {
@@ -518,6 +557,7 @@ impl Default for State {
             charge_mode: ChargeMode::default(),
             thermal_guard: true,
             thermal_limit: THERMAL_LIMIT_DEFAULT,
+            skyward_via: Via::default(),
         }
     }
 }

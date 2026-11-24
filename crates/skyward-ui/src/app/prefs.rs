@@ -46,6 +46,11 @@ pub enum Switch {
     /// Step the charge down a step when the battery gets warmer than the
     /// limit the slider sets, and start the recovery again to do it.
     ThermalGuard,
+    /// Where a new version of Skyward is looked for first: the release's
+    /// own addresses, or the accelerators. Tapping the choice already made
+    /// does nothing. It takes effect on the next download, so a change
+    /// made while one runs is not a source list under it.
+    UpdateVia(Via),
 }
 
 /// How long the screen stays on with nothing touched, in milliseconds, in

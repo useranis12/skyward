@@ -40,21 +40,25 @@ pub struct Build {
 impl Build {
     /// Where to download the zip from, in the order to try: the file's own
     /// short-lived address, where GitHub's API gave one, then the release's
-    /// link on github.com, which some networks do not reach.
-    pub fn sources(&self, located: Option<String>) -> Vec<String> {
-        // The API's own address first: it is the one GitHub hands out for the
-        // file, on the CDN that usually answers fastest. Then the mirrors,
-        // measured on this network in the order they answer fastest, and the
-        // main site last: it is the one GitHub throttles and this network
-        // sometimes cannot reach at all. A source that fails gives way to the
-        // next, and one that is merely slow is only as slow as it measures.
+    /// link on github.com, with the accelerators in front of or behind them
+    /// as `accelerator` asks. The order is a preference and not a filter:
+    /// a source that fails gives way to the next, one that is merely slow
+    /// is only as slow as it measures, and whichever serves the file has
+    /// its SHA-256 checked against the one GitHub publishes.
+    pub fn sources(&self, located: Option<String>, accelerator: bool) -> Vec<String> {
         let g = |host: &str| format!("https://{host}/{}", self.link);
-        located
-            .into_iter()
-            .chain([g("ghfast.top")])
-            .chain([g("gh-proxy.com")])
-            .chain([self.link.clone()])
-            .collect()
+        // The accelerators, measured on this network in the order they
+        // answer fastest: gh-proxy.com, then ghfast.top.
+        let accelerators = [g("gh-proxy.com"), g("ghfast.top")];
+        // GitHub's own: the API's address first, which is the one it hands
+        // out for the file, on the CDN that usually answers fastest, then
+        // the release's link, which some networks do not reach at all.
+        let github: Vec<String> = located.into_iter().chain([self.link.clone()]).collect();
+        if accelerator {
+            accelerators.into_iter().chain(github).collect()
+        } else {
+            github.into_iter().chain(accelerators).collect()
+        }
     }
 }
 
@@ -190,17 +194,38 @@ mod tests {
     }
 
     #[test]
-    fn a_zip_is_downloaded_from_where_github_sends_it_then_from_its_link() {
+    fn a_zip_is_downloaded_from_where_the_choice_puts_first() {
         let build = newest(ANSWERED_013, "ishtar", "0.1.2").unwrap().build.unwrap();
         let link = "https://github.com/kirklin/skyward/releases/download/v0.1.3/skyward-v0.1.3-ishtar-OS3.0.308.0.WMACNXM.zip";
-        let base = "https://github.com/kirklin/skyward/releases/download/v0.1.3/skyward-v0.1.3-ishtar-OS3.0.308.0.WMACNXM.zip";
+        let base = link;
         let ghfast = format!("https://ghfast.top/{base}");
         let ghproxy = format!("https://gh-proxy.com/{base}");
+        let located = "https://release-assets.githubusercontent.com/a?sig=1";
+
+        // Direct: GitHub's own addresses first, the accelerators behind
+        // them, so a source that will not answer still gives way.
         assert_eq!(
-            build.sources(Some("https://release-assets.githubusercontent.com/a?sig=1".into())),
-            ["https://release-assets.githubusercontent.com/a?sig=1", &ghfast, &ghproxy, link]
+            build.sources(Some(located.to_string()), false),
+            [located, link, ghproxy.as_str(), ghfast.as_str()],
+            "direct, with GitHub's short-lived address"
         );
-        assert_eq!(build.sources(None), [&ghfast, &ghproxy, link], "where GitHub's API gave no address");
+        assert_eq!(
+            build.sources(None, false),
+            [link, ghproxy.as_str(), ghfast.as_str()],
+            "direct, where GitHub's API gave no address"
+        );
+
+        // The accelerators first, with GitHub's own still following them.
+        assert_eq!(
+            build.sources(Some(located.to_string()), true),
+            [ghproxy.as_str(), ghfast.as_str(), located, link],
+            "accelerated, with GitHub's short-lived address"
+        );
+        assert_eq!(
+            build.sources(None, true),
+            [ghproxy.as_str(), ghfast.as_str(), link],
+            "accelerated, where GitHub's API gave no address"
+        );
     }
 
     /// A server on this computer that answers one request with `answer`,

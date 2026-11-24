@@ -2,7 +2,7 @@ use crate::app::{
     Action, AvbCheck, BackupAt, BackupEnd, BackupJob, Check, ChargeMode, ClashChoice, Confirm, Damage, Data, Dock, DownloadEnd, EraseStop, Field,
     FileKind, FileOp, FileTask, Fetch, Fold, Folder, Frame, FsAction, FsChoice, FsRow, Have, HeroArt, Hit, ImageEnd, ImageFlow, ImageJob, Install, JobEnd, Keys, Pick,
     Place, Rows, Screen, Serving, SkywardCheck, SkywardEnd, SkywardJob, SkywardStage, Slider, Source, State, Switch, SystemsWork, Target,
-    UsbDrive, UsbLink, Wipe, ADDABLE, BACKUP_PARTS, DATA_ERASED, DATA_PARTITION, DOWNLOADS, FASTBOOT_CHOICES, SCREEN_OFF, TARGETS,
+    UsbDrive, UsbLink, Via, Wipe, ADDABLE, BACKUP_PARTS, DATA_ERASED, DATA_PARTITION, DOWNLOADS, FASTBOOT_CHOICES, SCREEN_OFF, TARGETS,
     THERMAL_LIMIT_LEAST, THERMAL_LIMIT_MOST, TIME_ZONES, USB_DRIVE_UNREADABLE, USB_DRIVE_WANTED, WIPES, installs, starting,
 };
 use crate::canvas::Canvas;
@@ -4001,6 +4001,7 @@ pub fn skyward_update(cx: &Ctx) -> Frame {
     let y = widgets::section_first(&mut c, t, f, top, l.pick(["本机", "本機", "This phone"]));
     let y = widgets::info_card(&mut c, t, f, y, &[(l.pick(["当前版本", "目前版本", "Current version"]), VERSION.to_string())]);
     let y = widgets::section(&mut c, t, f, y, l.pick(["在线更新", "線上更新", "Online update"]));
+    let y = skyward_source(&mut c, cx, y, &mut out);
     let y = skyward_online(&mut c, cx, y, &mut out);
     let points = [
         l.pick([
@@ -4017,6 +4018,47 @@ pub fn skyward_update(cx: &Ctx) -> Frame {
     ];
     let y = widgets::notes(&mut c, t, f, y + t.m.card_gap, l.pick(NOTES), &points);
     Frame::new(t, fit(c, t, y), out, l.pick(SKYWARD_UPDATE), top)
+}
+
+/// Where a new version of Skyward is looked for first: the release's own
+/// addresses, or the accelerators in front of them. Both go on to the
+/// other once one fails, and whichever serves the file has its SHA-256
+/// checked, so the choice is about speed and reach rather than trust.
+/// The one already chosen is not offered as a hit: tapping it would do
+/// nothing.
+fn skyward_source(c: &mut Canvas, cx: &Ctx, y: f32, out: &mut Vec<Hit>) -> f32 {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let choices = [
+        (
+            Via::Direct,
+            ["直连 GitHub", "直連 GitHub", "Direct from GitHub"],
+            [
+                "先用 GitHub 自己的地址，失败了再试加速站。",
+                "先用 GitHub 自己的位址，失敗了再試加速站。",
+                "GitHub's own addresses first, the accelerators if they fail.",
+            ],
+        ),
+        (
+            Via::Accelerator,
+            ["加速站", "加速站", "Accelerators"],
+            [
+                "先用 gh-proxy.com 和 ghfast.top，失败了再用 GitHub 的地址。",
+                "先用 gh-proxy.com 和 ghfast.top，失敗了再用 GitHub 的位址。",
+                "gh-proxy.com and ghfast.top first, GitHub's own if they fail.",
+            ],
+        ),
+    ];
+    let rows: Vec<Row> = choices
+        .iter()
+        .map(|(via, name, detail)| Row::new(l.pick(*name)).subtitle(l.pick(*detail)).trail(Trail::Check(s.skyward_via == *via)))
+        .collect();
+    let list = widgets::list(c, t, f, y, &rows);
+    for (i, (via, _, _)) in choices.iter().enumerate() {
+        if s.skyward_via != *via {
+            out.extend(hits(&list.rows[i..=i], &[Action::Toggle(Switch::UpdateVia(*via))]));
+        }
+    }
+    list.bottom + t.m.card_gap
 }
 
 /// Asking GitHub for Skyward's newest release, then updating to it: its

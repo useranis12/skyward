@@ -101,6 +101,17 @@ impl App {
                     self.refresh();
                     return vec![Effect::ChargeStep(mode)];
                 }
+                // Where a new version is looked for first is chosen the same
+                // way: the one already chosen is not a hit, and the choice
+                // reaches the next download rather than one already under way.
+                if let Switch::UpdateVia(via) = switch {
+                    if self.state.skyward_via == via {
+                        return Vec::new();
+                    }
+                    self.state.skyward_via = via;
+                    self.refresh();
+                    return Vec::new();
+                }
                 // The guard is not offered on the plain step, and does nothing
                 // there: nothing a charge draws at that step can warm the
                 // battery enough to be worth watching.
@@ -121,6 +132,7 @@ impl App {
                     Switch::ThermalGuard => &mut self.state.thermal_guard,
                     Switch::Wlan => unreachable!("the WLAN switch is turned above"),
                     Switch::ChargeStep(_) => unreachable!("a charge step is chosen above"),
+                    Switch::UpdateVia(_) => unreachable!("where to look for a new version is chosen above"),
                 };
                 *on = !*on;
                 let now_on = *on;

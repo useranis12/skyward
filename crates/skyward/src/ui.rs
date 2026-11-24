@@ -46,7 +46,7 @@ use skyward_systems::Who;
 use skyward_ui::app::{
     App, Asked, AvbCheck, BackupAt, BackupEnd, BackupEntry, BackupRefusal, ChargeMode, ChargeNow, ClashChoice, Data, DownloadEnd, Effect, EraseStop,
     FileKind, FileOp, FileRow, FileTask, FsAction, FsRow, Have, Held, ImageEnd, ImageFlow, ImagePart, ItemEnd, ItemState, JobEnd, Keys, MountFailure,
-    Part, PartKind, PartStop, Place, RenameRefused, Screen, Shot, SkywardEnd, SkywardStage, Target, UsbDrive, UsbLink, Wipe, DATA_OPENING,
+    Part, PartKind, PartStop, Place, RenameRefused, Screen, Shot, SkywardEnd, SkywardStage, Target, UsbDrive, UsbLink, Via, Wipe, DATA_OPENING,
     DATA_PARTITION, DOWNLOADS, INSTALL_UNFINISHED, USB_DRIVE,
 };
 use skyward_ui::settings::Keeper;
@@ -3130,7 +3130,10 @@ impl Pages<'_> {
                 ensure!(self.installer.is_none(), "an installer is running already");
                 skyward_sys::kmsg(&format!("updating Skyward to {}", build.name))?;
                 let path = Path::new(skyward_sys::RUN).join(&build.name);
-                let task = updates::Task::UpdateSkyward { build, codename: cfg.device.codename.clone(), path };
+                // Where the page says the zip is looked for first, kept
+                // between starts with the rest of the settings.
+                let accelerator = self.app.state.skyward_via == Via::Accelerator;
+                let task = updates::Task::UpdateSkyward { build, codename: cfg.device.codename.clone(), path, accelerator };
                 self.skyward_updater = Some(updates::Worker::start(task, self.servers.clone())?);
             }
             Effect::StopSkywardUpdate => self.skyward_updater.as_ref().context("Skyward is not being updated")?.stop(),
