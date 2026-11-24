@@ -11,7 +11,8 @@ REDMI K70 Pro（`manet`）的支持，以及这台手机暴露出的修复：只
 屏幕、触摸与网络问题。本仓库只构建并发布这一款机型，因此
 [Releases](https://github.com/useranis12/skyward/releases) 里的 zip 永远是
 K70 Pro 的；下面列出的其他机型需要用 `device=all` 从源码构建。Skyward 的
-在线更新读取本仓库的 release，每个版本的更新内容写在对应的 release 上。
+在线更新读取本仓库的 release，每个版本的更新内容写在对应的 release 上，
+并汇总在 [CHANGELOG.md](CHANGELOG.md)。
 
 <p align="center">
   <img src="assets/home.png" width="30%" alt="首页">

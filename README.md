@@ -12,7 +12,8 @@ touch and Wi-Fi problems that only show up on it. It builds and releases that
 one phone's image, so the zip in [Releases](https://github.com/useranis12/skyward/releases)
 is always the K70 Pro's; the other phones below are built from source with
 `device=all`. Skyward reads its online updates from this repository's releases,
-and what each of them adds is written on it.
+and what each of them adds is written on it and collected in
+[CHANGELOG.md](CHANGELOG.md).
 
 <p align="center">
   <img src="assets/home.png" width="30%" alt="Home">
