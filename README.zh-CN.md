@@ -128,8 +128,9 @@ K70 Pro 的；下面列出的其他机型需要用 `device=all` 从源码构建�
 Skyward 需要已解锁的 bootloader。从 [Releases](https://github.com/useranis12/skyward/releases) 下载对应机型的 zip，每个文件都标有机型和代号，例如 REDMI K70 Pro (manet)。使用 `SHA256SUMS` 核对并解压之后，在手机处于 fastboot 模式的时候，把其中的镜像刷入当前运行槽位的 recovery 分区：
 
 ```sh
-unzip skyward-v0.4.0-manet-OS3.0.306.0.WNMCNXM.zip
-fastboot flash recovery skyward-v0.4.0-manet-OS3.0.306.0.WNMCNXM.img
+# 压缩包名带着版本号与构建，所以这里用通配而不是照抄
+unzip skyward-v0.4.1-*-manet-OS3.0.306.0.WNMCNXM.zip
+fastboot flash recovery skyward-v0.4.1-*-manet-OS3.0.306.0.WNMCNXM.img
 fastboot reboot recovery
 ```
 

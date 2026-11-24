@@ -142,8 +142,9 @@ phone's model and codename, such as REDMI K70 Pro (manet). Check it against
 the slot the phone runs from, with the phone in fastboot mode:
 
 ```sh
-unzip skyward-v0.4.0-manet-OS3.0.306.0.WNMCNXM.zip
-fastboot flash recovery skyward-v0.4.0-manet-OS3.0.306.0.WNMCNXM.img
+# the zip carries its version and build, so the name is matched rather than typed
+unzip skyward-v0.4.1-*-manet-OS3.0.306.0.WNMCNXM.zip
+fastboot flash recovery skyward-v0.4.1-*-manet-OS3.0.306.0.WNMCNXM.img
 fastboot reboot recovery
 ```
 
