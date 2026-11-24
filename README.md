@@ -6,6 +6,14 @@ English | [简体中文](README.zh-CN.md)
 
 Skyward is a recovery written in Rust, from scratch.
 
+This repository is [PXIAOHE/skyward](https://github.com/PXIAOHE/skyward) with the
+REDMI K70 Pro (`manet`) supported, and the fixes that phone took: the screen,
+touch and Wi-Fi problems that only show up on it. It builds and releases that
+one phone's image, so the zip in [Releases](https://github.com/useranis12/skyward/releases)
+is always the K70 Pro's; the other phones below are built from source with
+`device=all`. Skyward reads its online updates from this repository's releases,
+and what each of them adds is written on it.
+
 <p align="center">
   <img src="assets/home.png" width="30%" alt="Home">
   <img src="assets/settings-dark.png" width="30%" alt="Settings in dark mode">
@@ -89,6 +97,7 @@ read and set properties.
 
 | Device | Codename | Tested system version |
 | --- | --- | --- |
+| REDMI K70 Pro | `manet` | OS3.0.306.0.WNMCNXM (Android 16) |
 | Xiaomi 17 Ultra | `nezha` | OS4.0.4.0.XPACNXM (Android 17) |
 | Xiaomi 13 Ultra | `ishtar` | OS3.0.308.0.WMACNXM (Android 16) |
 
@@ -126,14 +135,14 @@ not been verified.
 ## Installing Skyward
 
 Skyward needs an unlocked bootloader. Download the zip for your phone from
-[Releases](https://github.com/kirklin/skyward/releases), where each shows as the
-phone's model and codename, such as Xiaomi 17 Ultra (nezha). Check it against
+[Releases](https://github.com/useranis12/skyward/releases), where each shows as the
+phone's model and codename, such as REDMI K70 Pro (manet). Check it against
 `SHA256SUMS`, unzip it, and flash the image inside to the recovery partition of
 the slot the phone runs from, with the phone in fastboot mode:
 
 ```sh
-unzip skyward-v0.2.0-nezha-OS4.0.4.0.XPACNXM.zip
-fastboot flash recovery skyward-v0.2.0-nezha-OS4.0.4.0.XPACNXM.img
+unzip skyward-v0.4.0-manet-OS3.0.306.0.WNMCNXM.zip
+fastboot flash recovery skyward-v0.4.0-manet-OS3.0.306.0.WNMCNXM.img
 fastboot reboot recovery
 ```
 

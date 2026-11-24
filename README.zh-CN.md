@@ -6,6 +6,13 @@
 
 Skyward 是使用 Rust 编写的 recovery，从零开始编写。
 
+本仓库是 [PXIAOHE/skyward](https://github.com/PXIAOHE/skyward) 加上对
+REDMI K70 Pro（`manet`）的支持，以及这台手机暴露出的修复：只在它身上出现的
+屏幕、触摸与网络问题。本仓库只构建并发布这一款机型，因此
+[Releases](https://github.com/useranis12/skyward/releases) 里的 zip 永远是
+K70 Pro 的；下面列出的其他机型需要用 `device=all` 从源码构建。Skyward 的
+在线更新读取本仓库的 release，每个版本的更新内容写在对应的 release 上。
+
 <p align="center">
   <img src="assets/home.png" width="30%" alt="首页">
   <img src="assets/settings-dark.png" width="30%" alt="深色模式下的设置">
@@ -85,6 +92,7 @@ Skyward 是使用 Rust 编写的 recovery，从零开始编写。
 
 | 机型 | 代号 | 测试的系统版本 |
 | --- | --- | --- |
+| REDMI K70 Pro | `manet` | OS3.0.306.0.WNMCNXM（Android 16） |
 | 小米 17 Ultra | `nezha` | OS4.0.4.0.XPACNXM（Android 17） |
 | 小米 13 Ultra | `ishtar` | OS3.0.308.0.WMACNXM（Android 16） |
 
@@ -116,11 +124,11 @@ Skyward 是使用 Rust 编写的 recovery，从零开始编写。
 
 ## 安装 Skyward
 
-Skyward 需要已解锁的 bootloader。从 [Releases](https://github.com/kirklin/skyward/releases) 下载对应机型的 zip，每个文件都标有机型和代号，例如 Xiaomi 17 Ultra (nezha)。使用 `SHA256SUMS` 核对并解压之后，在手机处于 fastboot 模式的时候，把其中的镜像刷入当前运行槽位的 recovery 分区：
+Skyward 需要已解锁的 bootloader。从 [Releases](https://github.com/useranis12/skyward/releases) 下载对应机型的 zip，每个文件都标有机型和代号，例如 REDMI K70 Pro (manet)。使用 `SHA256SUMS` 核对并解压之后，在手机处于 fastboot 模式的时候，把其中的镜像刷入当前运行槽位的 recovery 分区：
 
 ```sh
-unzip skyward-v0.2.0-nezha-OS4.0.4.0.XPACNXM.zip
-fastboot flash recovery skyward-v0.2.0-nezha-OS4.0.4.0.XPACNXM.img
+unzip skyward-v0.4.0-manet-OS3.0.306.0.WNMCNXM.zip
+fastboot flash recovery skyward-v0.4.0-manet-OS3.0.306.0.WNMCNXM.img
 fastboot reboot recovery
 ```
 
