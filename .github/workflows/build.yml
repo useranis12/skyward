@@ -44,10 +44,16 @@ jobs:
       - name: Hold the tag against the workspace's version
         run: |
           version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
-          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
-            echo "::error::the tag is $GITHUB_REF_NAME, and the workspace builds version $version"
-            exit 1
-          fi
+          # The tag is either the version itself, or the version with a
+          # build after it (v0.4.0-24c8945), which is how a fork names the
+          # zip it hands out: a tag naming any other version would have
+          # every phone find an update in the very build it runs.
+          case "$GITHUB_REF_NAME" in
+            "v$version"|"v$version-"*) ;;
+            *)
+              echo "::error::the tag is $GITHUB_REF_NAME, and the workspace builds version $version"
+              exit 1 ;;
+          esac
 
   check:
     name: Lint and test
@@ -205,9 +211,11 @@ jobs:
     name: Publish the release
     # The lint job asserts against upstream's expectations, which this branch
     # departs from; only the images matter here, so a failed lint must not keep
-    # the release back. A tag names the version built, and the branch is
-    # published from as well.
-    if: "always() && (github.ref_type == 'tag' || github.ref == 'refs/heads/main') && needs.recovery.result == 'success'"
+    # the release back. A release is published only when a tag asks for one:
+    # pushing a branch builds and hands out the artifact, and says nothing to
+    # the people who download Skyward, so the version they are offered is one
+    # someone chose to offer.
+    if: "always() && github.ref_type == 'tag' && needs.recovery.result == 'success'"
     needs: [tag, check, recovery]
     runs-on: ubuntu-24.04
     permissions:
@@ -236,16 +244,10 @@ jobs:
 
         run: |
           # The zips are named skyward-<version>-<codename>-..., where the
-          # version is the tag's name, or the short sha when a branch was
-          # pushed. A running build looks its own zip up by
-          # skyward-<tag>-<codename>-, so the release tag has to carry that
-          # same version.
-          if [ "$GITHUB_REF_TYPE" = tag ]; then
-            TAG="$GITHUB_REF_NAME"
-          else
-            semver=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
-            TAG="v$semver-${GITHUB_SHA::7}"
-          fi
+          # version is the tag's name. A running build looks its own zip up
+          # by skyward-<tag>-<codename>-, so the release tag has to carry
+          # that same version, and only a tag publishes one.
+          TAG="$GITHUB_REF_NAME"
           zips=()
           for zip in images/*.zip; do
             # skyward-<version>-<codename>-<stock>.zip, where the version may
