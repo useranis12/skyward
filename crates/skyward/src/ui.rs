@@ -2534,7 +2534,9 @@ impl Pages<'_> {
         // forgotten as soon as the recovery restarted.
         if let Some((ssid, password)) = self.wlan_trying.clone()
             && self.app.state.wlan.as_ref().is_some_and(|w| {
-                matches!(&w.joined, Some(j) if matches!(j.stage, Joining::Connected(_) | Joining::Addressing))
+                w.joined.as_ref().is_some_and(|j| {
+                    matches!(j.stage, Joining::Connected(_) | Joining::Addressing) && j.ssid == ssid
+                })
             })
         {
             match wlanmem::save(&ssid, &password) {
