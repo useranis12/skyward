@@ -300,12 +300,14 @@ impl Inputs {
             loop {
                 thread::sleep(TOUCH_REFRESH);
                 for w in &plain {
-                    // Written only where the node reads something else: these
-                    // hold a value, and one that already reads what is wanted
-                    // is left alone.
-                    if fs::read_to_string(&w.path).is_ok_and(|now| now.trim() == w.value.trim()) {
-                        continue;
-                    }
+                    // Written every round whether or not it reads back as
+                    // wanted. A driver may put its mode back the way it was
+                    // at power-up when the panel comes back from a rest, and
+                    // leave the node reading as it was while its own state
+                    // has moved on: a round that trusted the reading would
+                    // never tell it again, and the panel then answers no
+                    // finger at all until the phone restarts. Told every
+                    // round, it is told again the moment it is needed.
                     if fs::write(&w.path, &w.value).is_err() {
                         continue;
                     }
