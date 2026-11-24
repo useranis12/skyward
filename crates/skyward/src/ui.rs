@@ -73,6 +73,10 @@ const LEAVE_AFTER_MS: u64 = 1500;
 /// none by then, the pages are worked with the keys, their light shown.
 const TOUCH_WAIT: Duration = Duration::from_secs(5);
 
+/// How long a panel gone dark rests, ready to light again at once, before
+/// the display turns off, on a page whose double tap is turned off.
+const REST: Duration = Duration::from_secs(5);
+
 /// How long into a start the thermal guard waits before it acts, so a step
 /// is not taken twice: the readings go on coming while the recovery is being
 /// started again, and a battery still warm from the charge a step was taken
@@ -911,18 +915,6 @@ fn read_picture(app: &mut App) {
     }
 }
 
-/// Tell the touchscreen to keep watching for a tap while the panel is dark.
-/// The controller puts these nodes back to their power-up state at sleep, so
-/// they are said after the panel has gone off; saying them while it is lit
-/// switches the controller into gesture, where it answers no finger at all.
-fn tell_dark(cfg: &DeviceConfig) {
-    for w in &cfg.touch.dark {
-        if fs::write(&w.path, &w.value).is_ok() {
-            let _ = skyward_sys::kmsg(&format!("wrote {} to {} while the panel is dark", w.value.trim(), w.path));
-        }
-    }
-}
-
 /// Whether the file the name is kept in can be read. It sits on the data
 /// partition's device-encrypted half, which is open as soon as /data is
 /// mounted: no user's key is needed for it, so waiting for one leaves the name
@@ -1232,6 +1224,11 @@ struct Pages<'a> {
     /// Whether the panel's frame memory has been blacked out for an off
     /// panel; cleared once a real frame is shown again.
     blanked: bool,
+    /// Whether the dark panel is already being kept running for the double
+    /// tap, so that it is said once for each dark stretch.
+    keeps_running: bool,
+    /// When the dark panel was put at rest, on a page whose double tap is off.
+    rested_at: Option<Instant>,
     /// Started for fastboot, the port goes to the phone's own fastbootd. The
     /// page says whether it came up and how far a computer has the port;
     /// why it did not come up goes to the kernel log and on screen.
@@ -1514,6 +1511,8 @@ impl<'a> Pages<'a> {
             read_at,
             asked: None,
             blanked: false,
+            keeps_running: false,
+            rested_at: None,
             fastboot,
             port_at,
             transfer,
@@ -1918,19 +1917,33 @@ impl<'a> Pages<'a> {
             // Lit, a panel that came on again switches to its fastest
             // refresh.
             self.surface.speed_up()?;
+            self.keeps_running = false;
+            self.rested_at = None;
+        } else if self.app.state.double_tap {
+            // The panel is left running rather than put at rest or off: at
+            // rest the touch controller following it stops drawing power, and
+            // with it stops reporting a finger. That report is what both the
+            // double tap that lights the page and the page's own touch read,
+            // so the panel keeps its power while the backlight is off.
+            // Nothing shows then -- the frame memory is blacked out above and
+            // the backlight is at 0; the display itself goes on drawing,
+            // which the switch in the settings says it may.
+            if self.surface.is_on() && !self.keeps_running {
+                let _ = skyward_sys::kmsg("the display is dark; the panel keeps running for the double tap");
+                self.keeps_running = true;
+            }
         } else if self.surface.is_on() {
-            // With the backlight off, the display goes off at once rather than
-            // resting in its low-power mode first. That mode leaves the panel
-            // lit just enough to see in a dark room, which reads as a screen
-            // that will not go out, and it is only worth its wait on a phone
-            // that lights from it quickly enough to be noticed. This one does
-            // not: coming back from off is what the phone's own system does.
+            // The double tap is off, so the panel rests: ready to light again
+            // at once, and the touch controller following it stops drawing
+            // power.
+            self.surface.rest()?;
+            self.rested_at = Some(Instant::now());
+            self.keeps_running = false;
+        } else if self.rested_at.is_some_and(|at| at.elapsed() >= REST) {
+            // Rested long enough, the display goes off entirely: the panel
+            // and the display processor feeding it stop drawing power.
             self.surface.turn_off()?;
-            // Only now, with the panel dark, is the controller told to keep
-            // watching for a tap. It resets these nodes at sleep, and a write
-            // to either while the panel is lit switches it into gesture, where
-            // it answers no finger at all until the phone restarts.
-            tell_dark(self.cfg);
+            self.rested_at = None;
         }
         Ok((panel.is_some(), shown))
     }
@@ -1947,7 +1960,13 @@ impl<'a> Pages<'a> {
         // gets at least a millisecond.
         let floor = if shown { 0 } else { 1 };
         let until_due = self.app.deadline(now).map(|d| d.saturating_sub(now) as i32);
-        let timeout = if ahead { 0 } else { until_due.map_or(1000, |t| t.clamp(floor, 1000)) };
+        // A resting panel turns off once its rest is over.
+        let rest_left = self.rested_at.map(|at| REST.saturating_sub(at.elapsed()).as_millis() as i32);
+        let timeout = if ahead {
+            0
+        } else {
+            until_due.into_iter().chain(rest_left).min().map_or(1000, |t| t.clamp(floor, 1000))
+        };
         sleeper.allow(self.may_sleep()?);
         let mut fds = vec![self.inputs.fd(), uevents.fd(), sleeper.fd()];
         if let Some(i) = &self.installer {
