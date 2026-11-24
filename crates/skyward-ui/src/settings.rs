@@ -432,8 +432,7 @@ mod tests {
 
     #[test]
     fn where_a_new_version_is_looked_for_first_is_kept_by_the_name_it_means() {
-        let mut state = State::default();
-        state.skyward_via = Via::Direct;
+        let state = State { skyward_via: Via::Direct, ..State::default() };
         let text = Settings::of(&state).text();
         assert!(text.contains("\"update_via\": \"direct\""), "as what it means, not as a flag: {text}");
 
@@ -443,8 +442,7 @@ mod tests {
 
         // A choice this version does not have leaves the state as it is,
         // as a time zone outside the page's list does.
-        let mut kept = State::default();
-        kept.skyward_via = Via::Direct;
+        let mut kept = State { skyward_via: Via::Direct, ..State::default() };
         Settings { update_via: "satellite".into(), ..Settings::of(&kept) }.apply(&mut kept);
         assert_eq!(kept.skyward_via, Via::Direct, "an unknown choice is not obeyed");
 
