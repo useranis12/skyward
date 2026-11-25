@@ -42,8 +42,21 @@ pub fn slots(dir: &Path, next: Slot) -> Result<Vec<Slot>> {
         let path = image::device(dir, PARTITION, slot);
         let mut file = File::open(&path).with_context(|| format!("open {}", path.display()))?;
         image::drop_cache(&file).with_context(|| format!("drop the cached pages of {}", path.display()))?;
-        if slot == next || image::is_skyward(&mut file).with_context(|| format!("look into {}", path.display()))? {
+        if slot == next {
             slots.push(slot);
+            continue;
+        }
+        // The other slot is only asked about to widen the write, and the
+        // slot that starts next is written whether or not this one holds
+        // Skyward. A partition whose contents this build cannot read is one
+        // it cannot say holds Skyward, so it is left as it is rather than
+        // holding up the update of the slot that starts next over it.
+        match image::is_skyward(&mut file) {
+            Ok(true) => slots.push(slot),
+            Ok(false) => {}
+            Err(why) => {
+                let _ = skyward_sys::kmsg(&format!("update: cannot look into {}: {why:#}; leaving it as it is", path.display()));
+            }
         }
     }
     Ok(slots)
