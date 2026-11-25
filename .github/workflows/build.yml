@@ -69,10 +69,12 @@ jobs:
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
       # This branch departs from upstream's expectations in places, so some
       # of its tests no longer describe what the code does. The images are
-      # not built here; a red test should be read, not obeyed.
+      # not built here; a red test should be read, not obeyed. Each crate is
+      # run to the end even once one has failed, so the suite after the first
+      # failing crate is still run and read rather than never reached.
       - name: Test
         continue-on-error: true
-        run: cargo test --locked --workspace
+        run: cargo test --locked --workspace --no-fail-fast
       - name: Bring the lock file up to date for the phone
         run: cargo metadata --format-version 1 > /dev/null
       - name: Lint what runs on the phone
