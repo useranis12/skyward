@@ -170,7 +170,11 @@ pub fn device_config<R: Read + Seek>(file: &mut R) -> Result<Option<Vec<u8>>> {
         entry.read_to_end(&mut config).context("read the device configuration")?;
         Ok(config)
     };
-    find(ramdisk, |name| name == skyward_config::ramdisk::CONFIG, read).context("read the ramdisk")
+    // A ramdisk whose archive this build cannot read is not one it can say
+    // carries Skyward's device configuration. The recovery partitions hold
+    // images it did not make, and what it cannot open the archives of must
+    // not stop an update or an install of the build it was asked about.
+    Ok(find(ramdisk, |name| name == skyward_config::ramdisk::CONFIG, read).ok().flatten())
 }
 
 /// The partition `name` of `slot` among the links in `dir`.
