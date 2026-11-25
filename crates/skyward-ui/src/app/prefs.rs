@@ -2,6 +2,7 @@
 //! the language, the time zone, and how long the screen stays on.
 
 use super::*;
+use crate::lang::same;
 use anyhow::{Context, Result};
 use jiff::tz::TimeZone;
 

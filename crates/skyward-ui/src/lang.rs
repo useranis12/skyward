@@ -14,6 +14,12 @@ pub enum Lang {
 /// One text written in each language, in the order of [`Lang::ALL`].
 pub type Text = [&'static str; 3];
 
+/// A name every language writes the same, as [`Text`] holds one for each:
+/// `same("UTC")` is the three of them said alike.
+pub const fn same(name: &'static str) -> Text {
+    [name; 3]
+}
+
 impl Lang {
     /// The languages, in the order the language page lists them.
     pub const ALL: [Lang; 3] = [Lang::Hans, Lang::Hant, Lang::En];
