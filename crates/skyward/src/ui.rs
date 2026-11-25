@@ -3347,7 +3347,7 @@ impl Pages<'_> {
         ensure!(part.size == size, "the partition is {} bytes and was asked for as {size}", part.size);
         let place = if drive { Place::UsbDrive } else { Place::Storage };
         let folder = in_place(place, images::FOLDER);
-        let when = skyward_ui::fmt::stamp(unix_now()?, self.app.state.time_zone);
+        let when = skyward_ui::fmt::stamp(unix_now()?, self.app.state.zone());
         let into = folder.join(images::image_name(&partition, &when));
         skyward_sys::kmsg(&format!("writing {partition} out as an image at {}", into.display()))?;
         self.app.image_at(ImageFlow::Export, &partition, 0, part.size);
