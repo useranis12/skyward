@@ -1024,7 +1024,7 @@ fn main() -> Result<()> {
     }
 
     // The panel mid-gesture, to set beside recordings of the same moves.
-    let moments: [Moment; 27] = [
+    let moments: [Moment; 29] = [
         ("08-about-light", Screen::About, false, &|_, _| 2000),
         ("08-about-dark", Screen::About, true, &|_, _| 2000),
         ("08-about-light-later", Screen::About, false, &|_, _| 9000),
@@ -1115,6 +1115,28 @@ fn main() -> Result<()> {
             app.touch(Touch::Up, f, 150);
             let keys = [Cap::Space, Cap::Show(Layer::Digits), Cap::Char('-'), Cap::Show(Layer::Letters), Cap::Char('x')];
             type_keys(app, f, &info, &keys, 300)
+        }),
+        // The control centre, pulled down, with the two capsules at
+        // different levels.
+        ("190-shade-light", Screen::Home, false, &|app, f| {
+            app.state.brightness = 0.62;
+            app.state.vibration = 0.28;
+            let x = 700.0;
+            app.touch(Touch::Down(x, 8.0), f, 100);
+            app.touch(Touch::Move(x, 900.0), f, 200);
+            app.touch(Touch::Move(x, 2000.0), f, 300);
+            app.touch(Touch::Up, f, 400);
+            900
+        }),
+        ("191-shade-dark", Screen::Home, true, &|app, f| {
+            app.state.brightness = 0.62;
+            app.state.vibration = 0.28;
+            let x = 700.0;
+            app.touch(Touch::Down(x, 8.0), f, 100);
+            app.touch(Touch::Move(x, 900.0), f, 200);
+            app.touch(Touch::Move(x, 2000.0), f, 300);
+            app.touch(Touch::Up, f, 400);
+            900
         }),
     ];
     for (name, screen, dark, act) in moments {

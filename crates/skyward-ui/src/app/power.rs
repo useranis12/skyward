@@ -122,6 +122,13 @@ impl App {
         }
         self.state.confirm = 0.0;
         self.lock_rect = None;
+        // The control centre goes with the panel: what it held is let go of,
+        // rather than a sheet coming back up over the lock.
+        self.shade = 0.0;
+        self.shade_settle = None;
+        self.shade_last = None;
+        self.shade_speed = 0.0;
+        self.shade_press = None;
         self.darkening = self.panel(now);
         self.curtain.set(false, now);
         self.display_on = false;

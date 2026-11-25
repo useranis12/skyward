@@ -788,6 +788,8 @@ enum Drag {
     /// threshold, lifting goes back.
     Edge { start: f32, from_left: bool, armed: bool, x: f32, cy: f32 },
     Slider(Slider, Rect),
+    /// Pulling the control centre: where it began, and how far out it was then.
+    Shade { start: f32, from: f32 },
     Confirm { which: Confirm, track: Rect, grab: f32 },
     /// Scrolling a terminal's screen back through what the shell wrote, or
     /// the editor's text, `carry` being the part of a row not yet scrolled.
@@ -1243,6 +1245,163 @@ fn keyboard_strip(t: &Theme, frame: &Frame) -> (Canvas, i32) {
     (strip, top)
 }
 
+/// How far the control centre has to be pulled, in dp, for it to stay open
+/// once let go, and how long its settling takes.
+///
+/// This is how far a finger travels to open the sheet, so it is set against the
+/// sheet's own height rather than below it: at 110 dp the sheet came up more
+/// than four times as fast as the finger, and the least touch of the top edge
+/// filled half the screen. At 320 dp a pull of 40 dp shows a sliver and one of
+/// 115 dp keeps the sheet open, which is a pull the hand means.
+const SHADE_PULL_DP: f32 = 320.0;
+const SHADE_PERIOD: f32 = 1.8;
+/// The share of the pull past which letting go opens the sheet.
+const SHADE_KEEPS: f32 = 0.36;
+/// How tall the control centre's sheet is, in dp, at full pull: the time and
+/// the date, the twelve round tiles in three rows of four, the card saying
+/// how the phone stands, the two capsules, and the rounded foot with the
+/// grabber. It was 474 dp while the sheet held four square tiles.
+const SHADE_HEIGHT_DP: f32 = 556.0;
+
+/// The size a tile's word is set at, in dp. A quarter of the sheet is narrow,
+/// so the word is set small: at the row title's own size the longer ones --
+/// 文件传输, Screenshot -- filled the cell and crowded the mark above them.
+const SHADE_LABEL_DP: f32 = 10.0;
+/// The least a word is set at in its tile, in dp: shrunk to fit from
+/// [`SHADE_LABEL_DP`] down to this, and no further.
+const SHADE_NAME_LEAST_DP: f32 = 9.0;
+/// How fast a name still too long at that size rolls past, in dp a second. A
+/// name that fits is never rolled: only one that cannot be read whole is.
+const SHADE_ROLL_DP_S: f32 = 22.0;
+/// How long a rolling name rests at each end before setting off again, in ms.
+const SHADE_ROLL_REST_MS: u64 = 1400;
+
+/// How many pixels a second a name rolls at, on a panel `dp` pixels to the dp.
+fn roll_pace(dp: f32) -> f32 {
+    SHADE_ROLL_DP_S * dp
+}
+
+/// How long `over` pixels take to roll past at `pace` pixels a second, in ms.
+fn roll_ms(over: f32, pace: f32) -> u64 {
+    ((over / pace * 1000.0) as u64).max(1)
+}
+
+/// Where a name `travel` wide, of which `room` shows at a time, has got to
+/// `now` ms after its roll began: how far past its start the part shown
+/// begins, in the same pixels. `pace` is how fast it rolls, in pixels a
+/// second.
+///
+/// It rests at its start, rolls left until its end shows, rests there, and
+/// comes back, so a name is never cut at the end where the eye has not been
+/// yet. A name no wider than the room does not move at all.
+fn roll_offset(travel: f32, room: f32, pace: f32, now: u64) -> f32 {
+    let over = travel - room;
+    if over <= 0.0 || pace <= 0.0 {
+        return 0.0;
+    }
+    // The roll takes as long as the distance past the room at the roll's own
+    // pace, and each leg of the round trip is that and one rest at the end.
+    let roll = roll_ms(over, pace);
+    let leg = roll + SHADE_ROLL_REST_MS;
+    let t = now % (2 * leg);
+    if t < SHADE_ROLL_REST_MS {
+        0.0
+    } else if t < leg {
+        over * smooth((t - SHADE_ROLL_REST_MS) as f32 / roll as f32)
+    } else if t < leg + SHADE_ROLL_REST_MS {
+        over
+    } else {
+        over * (1.0 - smooth((t - leg - SHADE_ROLL_REST_MS) as f32 / roll as f32))
+    }
+}
+
+/// `k` from 0 to 1, moving off and coming to rest without a jolt.
+fn smooth(k: f32) -> f32 {
+    let k = k.clamp(0.0, 1.0);
+    k * k * (3.0 - 2.0 * k)
+}
+
+/// What a finger can press in the control centre.
+///
+/// The first twelve are the tiles, in the order they are laid out: three
+/// rows of four, the ones that turn something on or off above the ones that
+/// open a page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ShadeHit {
+    Wlan,
+    Vibrate,
+    Transfer,
+    UsbDrive,
+    Files,
+    Modules,
+    Partitions,
+    Terminal,
+    Sleep,
+    Screenshot,
+    Reboot,
+    Settings,
+    Brightness,
+    Vibration,
+}
+
+impl ShadeHit {
+    /// The tiles, in the order the sheet lays them out.
+    const TILES: [ShadeHit; 12] = [
+        ShadeHit::Wlan,
+        ShadeHit::Vibrate,
+        ShadeHit::Transfer,
+        ShadeHit::UsbDrive,
+        ShadeHit::Files,
+        ShadeHit::Modules,
+        ShadeHit::Partitions,
+        ShadeHit::Terminal,
+        ShadeHit::Sleep,
+        ShadeHit::Screenshot,
+        ShadeHit::Reboot,
+        ShadeHit::Settings,
+    ];
+
+    /// Whether the tile turns something on and off rather than opening a
+    /// page, and so shows lit while it is on.
+    fn lit(self, state: &State) -> bool {
+        match self {
+            ShadeHit::Wlan => state.wlan.as_ref().is_some_and(|w| w.power == Power::On),
+            ShadeHit::Vibrate => state.vibrate,
+            ShadeHit::Transfer => state.file_transfer,
+            ShadeHit::UsbDrive => matches!(state.usb_drive, Some(UsbDrive::Shown)),
+            _ => false,
+        }
+    }
+}
+
+/// A name in the control centre's WLAN tile, longer than the tile shows,
+/// rolling so that all of it is read.
+#[derive(Clone, Copy, Debug)]
+struct Roll {
+    /// When the name set off.
+    since: u64,
+    /// How wide the name is, and how much of it the tile shows.
+    travel: f32,
+    room: f32,
+    /// How fast it rolls, in pixels a second.
+    pace: f32,
+}
+
+impl Roll {
+    /// How far past its start the part shown begins, at `now`.
+    fn offset(&self, now: u64) -> f32 {
+        roll_offset(self.travel, self.room, self.pace, now.saturating_sub(self.since))
+    }
+
+    /// Whether the name is on the move at `now`, rather than resting at one
+    /// end of its round trip.
+    fn rolling(&self, now: u64) -> bool {
+        let leg = roll_ms(self.travel - self.room, self.pace) + SHADE_ROLL_REST_MS;
+        let t = now.saturating_sub(self.since) % (2 * leg);
+        (t >= SHADE_ROLL_REST_MS && t < leg) || t >= leg + SHADE_ROLL_REST_MS
+    }
+}
+
 /// What a locked screen holds: how far the knob has been slid along.
 struct Lock {
     drag: f32,
@@ -1343,8 +1502,25 @@ pub struct App {
     lock_shown: bool,
     /// Where the lock's knob was last drawn, which is where a finger finds it.
     lock_rect: Option<Rect>,
-    /// The date the lock shows, as the system keeps it.
+    /// The date the lock and the control centre show, as the system keeps
+    /// it.
     date: String,
+    /// The control centre: how far it is pulled out, the pull it settles from,
+    /// the finger that started it, and what can be pressed on it.
+    shade: f32,
+    /// Where a finger that came down near the top edge started: it becomes a
+    /// pull only once it moves down, so a tap up there still reaches the page.
+    shade_from: Option<f32>,
+    shade_settle: Option<(u64, f32, f32, f32, f32)>,
+    shade_last: Option<(u64, f32)>,
+    shade_speed: f32,
+    shade_press: Option<(ShadeHit, f32)>,
+    shade_hits: Vec<(Rect, ShadeHit)>,
+    /// The name in the WLAN tile rolling, while it is longer than its tile.
+    shade_roll: Option<Roll>,
+    /// When to take the screenshot a tile asked for, once the page under the
+    /// sheet has been drawn without it.
+    shot_when: Option<u64>,
     display_on: bool,
     /// When the screen was last touched or a key pressed; set on the first
     /// tick, so the time before the UI started does not count.
@@ -1451,6 +1627,15 @@ impl App {
             lock_shown: false,
             lock_rect: None,
             date: String::new(),
+            shade: 0.0,
+            shade_from: None,
+            shade_settle: None,
+            shade_last: None,
+            shade_speed: 0.0,
+            shade_press: None,
+            shade_hits: Vec::new(),
+            shade_roll: None,
+            shot_when: None,
             display_on: true,
             tap_at: None,
             active: None,
@@ -1512,6 +1697,12 @@ impl App {
         std::mem::take(&mut self.dirty)
     }
 
+    /// Whether the control centre is out, on its way out or being pulled, which
+    /// the loop asks for a frame a turn while.
+    pub fn shade_busy(&self) -> bool {
+        self.shade > 0.0 || self.shade_settle.is_some() || matches!(self.drag, Drag::Shade { .. })
+    }
+
     /// When time next has to pass through [`App::tick`]: at once while
     /// something on the lit screen moves on its own, a frame on while the
     /// backlight eases, else when a shown message should disappear or the
@@ -1530,6 +1721,8 @@ impl App {
                 || self.morph.is_some()
                 || self.turn.is_some()
                 || self.row_press.is_some_and(|p| p.changing(now) || p.gone(now))
+                || self.shade_busy()
+                || self.shot_when.is_some()
                 || self.glowing());
         // The content going dark or coming up, and the charging screen's
         // tide, move a frame at a time while the panel is lit.
@@ -1580,6 +1773,39 @@ impl App {
     /// deadline goes away.
     pub fn tick(&mut self, now: u64) -> Vec<Effect> {
         let mut fx = Vec::new();
+        // The control centre, let go, settles into place in one move, easing
+        // out rather than swinging about where it is headed for.
+        if let Some((at, from, _speed, period, target)) = self.shade_settle {
+            let t = now.saturating_sub(at) as f32 / 1000.0;
+            let k = (t / period).clamp(0.0, 1.0);
+            let eased = k * k * (3.0 - 2.0 * k);
+            self.shade = ((target + from * (1.0 - eased)) / SHADE_PULL_DP).clamp(0.0, 1.0);
+            if k >= 1.0 {
+                self.shade_settle = None;
+                self.shade = (target / SHADE_PULL_DP).clamp(0.0, 1.0);
+            }
+            self.dirty = true;
+        }
+        // A name in the control centre's WLAN tile, too long for its tile,
+        // rolls: the loop draws the sheet every turn while it is out, but the
+        // panel is only copied on a frame that says it changed, so the name
+        // asks for one every few turns rather than every one. A sheet put
+        // away has no name to read, whatever is left of one standing still.
+        if self.shade > 0.0
+            && let Some(roll) = self.shade_roll
+            && roll.rolling(now)
+        {
+            self.dirty = true;
+        }
+        // The sheet goes first, and the shot is taken a few frames later, once
+        // the page under it has been drawn: taken at once, the sheet would be
+        // in it.
+        if let Some(at) = self.shot_when
+            && now >= at
+        {
+            self.shot_when = None;
+            fx.push(Effect::Screenshot { storage: self.state.place_open(Place::Storage) });
+        }
         // The key waiting for its partner in a screenshot, left alone long
         // enough, does what it does alone.
         if self.chord.is_some_and(|(_, at)| now >= at + CHORD_MS) {

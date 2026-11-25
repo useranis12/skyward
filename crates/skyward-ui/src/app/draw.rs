@@ -3,6 +3,7 @@
 //! over the page.
 
 use super::*;
+use crate::icons::{self, Icon};
 
 impl App {
     /// What the status bar shows, its clock reading `clock`: the battery,
@@ -172,6 +173,9 @@ impl App {
         if charge > 0.0 {
             self.compose_charging(out, f, info, charge, now);
         }
+        if self.shade > 0.0 {
+            self.paint_shade(out, f, info, clock, now);
+        }
         // The page comes up from black as the panel lights, and goes dark as
         // it goes off. The lock is drawn while the panel is lit, and through
         // the fade if the lock was what the panel was showing when it began to
@@ -185,6 +189,252 @@ impl App {
             self.compose_lock(out, f, info, clock, drag);
         }
         out.dim(self.curtain.level(now));
+    }
+
+    /// The control centre, pulled down from the top edge: the time and the
+    /// date, the twelve round tiles in three rows of four, the card saying
+    /// how the phone stands, and the two capsules.
+    fn paint_shade(&mut self, out: &mut Canvas, f: &Fonts, info: &DeviceInfo, clock: &str, now: u64) {
+        self.shade_hits.clear();
+        if self.shade <= 0.0 {
+            // Nothing of the sheet shows, so nothing of it rolls either.
+            self.shade_roll = None;
+            return;
+        }
+        let t = self.theme();
+        let m = t.m;
+        let w = m.w as f32;
+        let l = self.state.lang;
+        let white = Rgba::rgb(255, 255, 255);
+        let tall = m.dp(SHADE_HEIGHT_DP);
+        let sheet = tall * self.shade;
+        let top = sheet - tall;
+        let pane = Rgba::rgb(20, 20, 26).with_alpha(238);
+        // What the WLAN tile says: the network joined where one is, and how the
+        // WLAN stands otherwise. Kept as its own string, since the tile records
+        // where the name has rolled to while it draws it.
+        let wlan = self.state.wlan.as_ref().map_or_else(|| l.pick(["已关闭", "已關閉", "Off"]), |w| fmt::wlan_value(l, w)).to_owned();
+        // The sheet itself, its foot rounded off.
+        //
+        // One shape, drawn once. It was a body, two circles and a strip between
+        // them, and each of the four laid the pane at its own alpha: where they
+        // met along the foot the corners came out laid twice, which is darker
+        // than the rest, and the circle's antialiased edge left a wedge of the
+        // page showing beside it. One rounded rect has no joins to show.
+        //
+        // The top corners are square, since the sheet comes down from the top
+        // edge; only the foot is rounded, so the radius is given to the bottom
+        // alone by drawing the shape a radius taller than it shows and letting
+        // the screen's edge cut the top.
+        //
+        // A barely opened sheet is shorter than the radius, and a radius that
+        // large would round its top corners too, leaving the screen's edge
+        // showing through them. The radius gives way to the sheet's height.
+        let radius = m.dp(30.0).min(sheet.max(0.0));
+        out.fill_round_rect(0.0, top - radius, w, sheet - top + radius, radius, pane);
+        // A grabber at the foot of the sheet.
+        out.fill_round_rect(w / 2.0 - m.dp(18.0), sheet - m.dp(13.0), m.dp(36.0), m.dp(5.0), m.dp(2.5), white.with_alpha(80));
+        // The time, with the date beside it on the same line: the date set a
+        // size smaller and taking its width from the time, so the two read as
+        // one line rather than two blocks. The battery's percentage used to sit
+        // at the far right; it is on the card below now, beside the rest of
+        // what the phone says of itself.
+        let inset = m.dp(15.0);
+        let time_px = m.dp(44.0);
+        out.text(&f.heading, clock, m.margin + inset, top + m.dp(88.0), time_px, white, None);
+        let date = self.date.as_str();
+        if !date.is_empty() {
+            let wide = out.text_width(&f.heading, clock, time_px);
+            out.text(&f.body, date, m.margin + inset + wide + m.dp(12.0), top + m.dp(86.0), m.dp(19.0), white.with_alpha(170), None);
+        }
+        // The twelve round tiles, three rows of four. A tile is a disc with its
+        // mark in it and its word under it, and the ones that turn something on
+        // show lit while it is on.
+        let (gap, disc, word_gap) = (m.dp(10.0), m.dp(56.0), m.dp(7.0));
+        let cell = (w - m.margin * 2.0 - gap * 3.0) / 4.0;
+        let tiles_top = top + m.dp(116.0);
+        let row_h = disc + word_gap + m.dp(19.0);
+        let mut hits = Vec::new();
+        for (i, hit) in ShadeHit::TILES.into_iter().enumerate() {
+            let (col, row) = (i % 4, i / 4);
+            let cx = m.margin + col as f32 * (cell + gap) + cell / 2.0;
+            let cy = tiles_top + row as f32 * (row_h + gap) + disc / 2.0;
+            let lit = hit.lit(&self.state);
+            // The whole cell answers a touch, not the disc alone: a finger is
+            // not asked to find the middle of it.
+            hits.push((Rect::new(cx - cell / 2.0, cy - disc / 2.0 - m.dp(2.0), cell, row_h + m.dp(4.0)), hit));
+            let fill = if lit { t.pal.accent.with_alpha(232) } else { white.with_alpha(30) };
+            out.fill_circle(cx, cy, disc / 2.0, fill);
+            let ink = if lit { white } else { white.with_alpha(238) };
+            Self::shade_glyph(out, &t, hit, cx, cy, m.dp(26.0), ink);
+            // The tile's word, kept inside its cell however long it is: a name
+            // wider than the cell would run under the tile beside it.
+            let label = Self::shade_label(l, hit, &wlan);
+            let px = widgets::fitted_px(out, &f.body, label, m.dp(SHADE_LABEL_DP), m.dp(SHADE_NAME_LEAST_DP), cell);
+            let travel = out.text_width(&f.body, label, px);
+            let baseline = cy + disc / 2.0 + word_gap + m.dp(14.0);
+            if travel <= cell {
+                if hit == ShadeHit::Wlan {
+                    self.shade_roll = None;
+                }
+                let x = cx - travel / 2.0;
+                out.text(&f.body, label, x, baseline, px, ink, None);
+            } else if hit == ShadeHit::Wlan {
+                // A name still too long at the least size rolls, rather than
+                // being cut: the whole of it is read as it passes.
+                let since = match self.shade_roll {
+                    Some(r) if (r.travel - travel).abs() < 0.5 => r.since,
+                    _ => now,
+                };
+                let roll = Roll { since, travel, room: cell, pace: roll_pace(m.dp(1.0)) };
+                self.shade_roll = Some(roll);
+                let x = cx - cell / 2.0;
+                Self::paint_rolled(out, &f.body, label, x, baseline, px, cell, ink, roll.offset(now));
+            } else {
+                // Anything else too long is set from its middle and let past
+                // its cell, since it names a page rather than a network.
+                let x = cx - travel / 2.0;
+                out.text(&f.body, label, x, baseline, px, ink, None);
+            }
+        }
+        // The card saying how the phone stands: whether its data is open, the
+        // slot it starts from, what is left in the battery and how warm it is.
+        let card_top = tiles_top + 3.0 * (row_h + gap) + m.dp(4.0);
+        let card = Rect::new(m.margin, card_top, w - m.margin * 2.0, m.dp(58.0));
+        out.fill_round_rect(card.x, card.y, card.w, card.h, m.dp(18.0), white.with_alpha(20));
+        let cells: [String; 4] = [
+            fmt::data(l, &self.state.data).to_owned(),
+            info.slot.map_or_else(|| "\u{2014}".to_owned(), |s| s.letter().to_owned()),
+            info.battery.as_ref().map_or_else(|| "\u{2014}".to_owned(), |b| format!("{}%", b.level)),
+            info.battery.as_ref().and_then(|b| b.temp).map_or_else(|| "\u{2014}".to_owned(), fmt::celsius),
+        ];
+        let caps = [
+            l.pick(["数据", "資料", "Data"]),
+            l.pick(["槽位", "槽位", "Slot"]),
+            l.pick(["电量", "電量", "Battery"]),
+            l.pick(["温度", "溫度", "Temp"]),
+        ];
+        let cell_w = card.w / 4.0;
+        for (i, (value, cap)) in cells.iter().zip(caps).enumerate() {
+            let cx = card.x + cell_w * i as f32 + cell_w / 2.0;
+            let wide = out.text_width(&f.body, value, m.row_title_px);
+            out.text(&f.body, value, cx - wide / 2.0, card.y + m.dp(26.0), m.row_title_px, white, None);
+            let small = m.dp(12.0);
+            let wide = out.text_width(&f.body, cap, small);
+            out.text(&f.body, cap, cx - wide / 2.0, card.y + m.dp(45.0), small, white.with_alpha(150), None);
+        }
+        // The backlight and the motor: two capsules side by side, each filled
+        // from its left end as far as its value goes, with the mark alone at
+        // its middle -- the name inside was never level with anything. A finger
+        // anywhere on one slides it.
+        let cap_h = m.dp(46.0);
+        let cap_w = (w - m.margin * 2.0 - gap) / 2.0;
+        let row = card.y + card.h + m.dp(14.0);
+        for (col, (which, hit)) in [(Slider::Brightness, ShadeHit::Brightness), (Slider::Vibration, ShadeHit::Vibration)].into_iter().enumerate() {
+            let value = match which {
+                Slider::Brightness => self.state.brightness,
+                // The sheet's two are the only ones it holds; the charge
+                // page's are drawn on the charge page.
+                _ => self.state.vibration,
+            }
+            .clamp(0.0, 1.0);
+            let cap = Rect::new(m.margin + col as f32 * (cap_w + gap), row, cap_w, cap_h);
+            out.fill_round_rect(cap.x, cap.y, cap.w, cap.h, cap.h / 2.0, white.with_alpha(26));
+            // The fill keeps the capsule's own ends: narrow, it is still a
+            // capsule, not a bar with one round corner.
+            let filled = (cap.w * value).max(cap.h);
+            out.fill_round_rect(cap.x, cap.y, filled, cap.h, cap.h / 2.0, t.pal.accent.with_alpha(210));
+            // The mark stands at the capsule's left end, level with its
+            // middle, as a control's own icon does; the rest of the capsule is
+            // the level it is set to.
+            Self::shade_glyph(out, &t, hit, cap.x + m.dp(26.0), cap.y + cap.h / 2.0, m.dp(23.0), white.with_alpha(235));
+            hits.push((cap, hit));
+        }
+        self.shade_hits = hits;
+    }
+
+    /// The WLAN tile's name, set from `x` at `px`, kept inside `room` however
+    /// long it is: a name too long to fit is set smaller where that is enough,
+    /// and rolled where it is not.
+    ///
+    /// The roll is the whole name drawn as ink and laid down shifted inside a
+    /// strip the width of the tile, so no part of a name is ever cut by its
+    /// bytes -- an SSID may be anything at all, and slicing one by index would
+    /// split a character.
+    #[allow(clippy::too_many_arguments)]
+    fn paint_rolled(out: &mut Canvas, face: &crate::font::Face, name: &str, x: f32, baseline: f32, px: f32, room: f32, ink: Rgba, shift: f32) {
+        let (_, top) = face.ink(px);
+        // A sprite of the name as it stands shifted, in white, kept as
+        // coverage alone: it is laid down in the tile's own ink.
+        let strip = Sprite::capture(x, baseline + top, room.ceil() as u32, (px * 1.6).ceil() as u32, |c, dx, dy| {
+            c.text(face, name, x - shift + dx, baseline + dy, px, Rgba::rgb(255, 255, 255), None);
+        });
+        strip.draw(out, 0.0, 0.0, ink, 1.0);
+    }
+
+    /// What a tile is called on the sheet: the network's own name for the
+    /// WLAN, and a word for each of the others.
+    fn shade_label(l: Lang, hit: ShadeHit, wlan: &str) -> &str {
+        match hit {
+            ShadeHit::Wlan => wlan,
+            ShadeHit::Vibrate => l.pick(["震动", "震動", "Vibration"]),
+            ShadeHit::Transfer => l.pick(["文件传输", "檔案傳輸", "Transfer"]),
+            ShadeHit::UsbDrive => l.pick(["U 盘", "USB 隨身碟", "USB drive"]),
+            ShadeHit::Files => l.pick(["文件管理", "檔案管理", "Files"]),
+            ShadeHit::Modules => l.pick(["模块管理", "模組管理", "Modules"]),
+            ShadeHit::Partitions => l.pick(["分区管理", "分割區管理", "Partitions"]),
+            ShadeHit::Terminal => l.pick(["终端", "終端機", "Terminal"]),
+            ShadeHit::Sleep => l.pick(["熄屏", "關閉螢幕", "Screen off"]),
+            ShadeHit::Screenshot => l.pick(["截图", "截圖", "Screenshot"]),
+            ShadeHit::Reboot => l.pick(["重启", "重新啟動", "Reboot"]),
+            ShadeHit::Settings => l.pick(["设置", "設定", "Settings"]),
+            ShadeHit::Brightness | ShadeHit::Vibration => "",
+        }
+    }
+
+    /// The mark a tile or a slider carries.
+    fn shade_glyph(out: &mut Canvas, t: &Theme, hit: ShadeHit, cx: f32, cy: f32, size: f32, ink: Rgba) {
+        let m = &t.m;
+        let stroke = (size * 0.075).max(m.dp(1.6));
+        match hit {
+            ShadeHit::Wlan => icons::glyph(out, Icon::Wlan, cx, cy, size, ink),
+            ShadeHit::Sleep => icons::glyph(out, Icon::Power, cx, cy, size, ink),
+            ShadeHit::Screenshot => {
+                // A camera: its body, the bump over its viewfinder, its lens.
+                let (w, h) = (size * 0.74, size * 0.54);
+                let top = cy - h / 2.0 + size * 0.04;
+                out.stroke_round_rect(cx - w / 2.0, top, w, h, size * 0.13, stroke, ink);
+                out.fill_round_rect(cx - size * 0.12, top - size * 0.10, size * 0.24, size * 0.11, size * 0.045, ink);
+                out.stroke_circle(cx, top + h / 2.0, size * 0.145, stroke, ink);
+            }
+            ShadeHit::Reboot => icons::glyph(out, Icon::Restore, cx, cy, size, ink),
+            // The motor's mark is the slider's own: the tile and the capsule
+            // below it stand for the same thing.
+            ShadeHit::Vibrate | ShadeHit::Vibration => {
+                // Three bars, the middle one longer: a motor tapping.
+                for (i, tall) in [0.36f32, 0.68, 0.36].iter().enumerate() {
+                    let x = cx + (i as f32 - 1.0) * size * 0.24;
+                    out.fill_round_rect(x - size * 0.06, cy - size * tall / 2.0, size * 0.12, size * tall, size * 0.06, ink);
+                }
+            }
+            ShadeHit::Transfer => icons::glyph(out, Icon::Usb, cx, cy, size, ink),
+            ShadeHit::UsbDrive => icons::glyph(out, Icon::UsbDrive, cx, cy, size, ink),
+            ShadeHit::Files => icons::glyph(out, Icon::Folder, cx, cy, size, ink),
+            ShadeHit::Modules => icons::glyph(out, Icon::Layers, cx, cy, size, ink),
+            ShadeHit::Partitions => icons::glyph(out, Icon::Mount, cx, cy, size, ink),
+            ShadeHit::Terminal => icons::glyph(out, Icon::Terminal, cx, cy, size, ink),
+            ShadeHit::Settings => icons::glyph(out, Icon::Gear, cx, cy, size, ink),
+            ShadeHit::Brightness => {
+                // A sun: its disc and eight rays.
+                out.fill_circle(cx, cy, size * 0.19, ink);
+                for k in 0..8 {
+                    let a = k as f32 * std::f32::consts::TAU / 8.0;
+                    let (sin, cos) = a.sin_cos();
+                    let (r0, r1) = (size * 0.30, size * 0.45);
+                    out.line(cx + cos * r0, cy + sin * r0, cx + cos * r1, cy + sin * r1, stroke, ink);
+                }
+            }
+        }
     }
 
     /// Where the lock's knob is: the rect it is drawn in, which is the rect a
@@ -965,5 +1215,138 @@ mod tests {
         app.compose(&mut screen, &f, &i, "12:00", 4500);
         assert!(app.morph.is_none());
         assert_eq!(top(&screen), Some(home.ceil()));
+    }
+
+    #[test]
+    fn the_control_centre_lays_out_twelve_tiles_and_every_one_answers_a_touch() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut c = Canvas::new(W, H);
+        app.shade = 1.0;
+        app.compose(&mut c, &f, &i, "12:00", 1000);
+        // The twelve tiles and the two capsules, and nothing else.
+        assert_eq!(app.shade_hits.len(), 14, "twelve tiles and two capsules");
+        let tiles: Vec<ShadeHit> = app.shade_hits.iter().map(|(_, h)| *h).filter(|h| !matches!(h, ShadeHit::Brightness | ShadeHit::Vibration)).collect();
+        assert_eq!(tiles, ShadeHit::TILES.to_vec(), "the tiles in the order the sheet lays them out");
+        // Every one of them sits inside the sheet, and no two overlap: a tile
+        // a finger cannot reach, or one that takes another's touch, is a tile
+        // that does nothing.
+        let sheet = app.theme().m.dp(SHADE_HEIGHT_DP);
+        for (k, (rect, hit)) in app.shade_hits.iter().enumerate() {
+            assert!(rect.y >= 0.0 && rect.y + rect.h <= sheet, "{hit:?} runs past the sheet: {rect:?}");
+            assert!(rect.x >= 0.0 && rect.x + rect.w <= W as f32, "{hit:?} runs off the side: {rect:?}");
+            for (o, oh) in app.shade_hits.iter().skip(k + 1) {
+                let apart = rect.x + rect.w <= o.x || o.x + o.w <= rect.x || rect.y + rect.h <= o.y || o.y + o.h <= rect.y;
+                assert!(apart, "{hit:?} and {oh:?} overlap");
+            }
+        }
+        // The rows are three, and the four of each sit on the same line.
+        let ys: Vec<f32> = app.shade_hits.iter().filter(|(_, h)| ShadeHit::TILES.contains(h)).map(|(r, _)| r.y).collect();
+        assert_eq!(ys.chunks(4).count(), 3, "three rows of four");
+        for row in ys.chunks(4) {
+            assert!(row.windows(2).all(|w| (w[0] - w[1]).abs() < 0.01), "a row is level: {row:?}");
+        }
+        assert!(ys[0] < ys[4] && ys[4] < ys[8], "and the rows run down the sheet");
+    }
+
+    #[test]
+    fn the_control_centre_lights_the_tiles_that_turn_something_on() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut c = Canvas::new(W, H);
+        app.shade = 1.0;
+        // Nothing on: the WLAN is off, the motor still, file transfer off and
+        // no drive plugged in.
+        app.state.wlan = None;
+        app.state.vibrate = false;
+        app.state.file_transfer = false;
+        app.state.usb_drive = None;
+        app.compose(&mut c, &f, &i, "12:00", 1000);
+        let lit = |app: &App| -> Vec<ShadeHit> { ShadeHit::TILES.into_iter().filter(|h| h.lit(&app.state)).collect() };
+        assert!(lit(&app).is_empty(), "nothing is lit with everything off");
+        // Turned on, each shows lit; the ones that open a page never do.
+        app.state.wlan = Some(connected("Redmi-AX6000"));
+        app.state.vibrate = true;
+        app.state.file_transfer = true;
+        app.state.usb_drive = Some(UsbDrive::Shown);
+        app.compose(&mut c, &f, &i, "12:00", 1000);
+        assert_eq!(lit(&app), vec![ShadeHit::Wlan, ShadeHit::Vibrate, ShadeHit::Transfer, ShadeHit::UsbDrive]);
+        assert!(!ShadeHit::Files.lit(&app.state) && !ShadeHit::Settings.lit(&app.state), "a page's tile is never lit");
+    }
+
+    #[test]
+    fn a_name_too_long_for_its_tile_is_set_smaller_before_it_is_rolled() {
+        let (f, i) = (fonts(), info());
+        let t = Theme::light(W, H, PPD);
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut c = Canvas::new(W, H);
+        // A name that fits at the tile's own size is not rolled. The tiles
+        // are a quarter of the sheet wide, so the name has to be short.
+        app.state.wlan = Some(connected("Mi"));
+        app.shade = 1.0;
+        app.compose(&mut c, &f, &i, "12:00", 1000);
+        assert!(app.shade_roll.is_none(), "a name that fits is still");
+
+        // One far too long for any size that fits: it rolls.
+        let long = "一个很长很长的无线网络名称用来看看跑马灯";
+        app.state.wlan = Some(connected(long));
+        app.compose(&mut c, &f, &i, "12:00", 2000);
+        let roll = app.shade_roll.expect("a name too long to set whole rolls");
+        assert!(roll.travel > roll.room, "wider than the tile at its least size");
+        assert_eq!(roll.since, 2000, "it sets off the first time it is drawn");
+        // The least size is the floor, not smaller.
+        let least = t.m.dp(SHADE_NAME_LEAST_DP);
+        let room = roll.room;
+        let at_least = c.text_width(&f.body, long, least);
+        assert!(at_least > room, "the floor does not fit either, so it rolls");
+    }
+
+    #[test]
+    fn a_rolling_name_keeps_its_place_and_asks_for_frames_only_while_it_moves() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut c = Canvas::new(W, H);
+        app.state.wlan = Some(connected("一个很长很长的无线网络名称用来看看跑马灯"));
+        app.shade = 1.0;
+        app.compose(&mut c, &f, &i, "12:00", 1000);
+        let first = app.shade_roll.expect("rolling");
+        // A frame later the name has not set off again.
+        app.compose(&mut c, &f, &i, "12:00", 1040);
+        assert_eq!(app.shade_roll.expect("still rolling").since, first.since, "it keeps its place");
+
+        // Resting at its start, it asks for nothing: the sheet is drawn every
+        // turn while it is out, and a frame a turn would copy the panel for a
+        // name that is standing still.
+        app.tick(first.since + 100);
+        let _ = app.take_dirty();
+        app.tick(first.since + 200);
+        assert!(!app.take_dirty(), "at rest it does not have the panel copied");
+
+        // On the move it does, every turn it moves.
+        let moving = first.since + SHADE_ROLL_REST_MS + 100;
+        app.tick(moving);
+        assert!(app.take_dirty(), "a moving name has the panel copied");
+        app.tick(moving + 100);
+        assert!(app.take_dirty(), "and again while it is still moving");
+    }
+
+    #[test]
+    fn a_rolled_name_never_leaves_its_tile() {
+        // The offset stays between the name's start and its end, and comes
+        // back: nothing of the round trip runs past the tile.
+        let (travel, room) = (900.0, 400.0);
+        let over = travel - room;
+        for ms in (0..40_000).step_by(7) {
+            let at = roll_offset(travel, room, 66.0, ms);
+            assert!((0.0..=over).contains(&at), "{ms} ms: {at}");
+        }
+        // It rests at the start, then at the end, and comes back.
+        assert_eq!(roll_offset(travel, room, 66.0, 0), 0.0);
+        let roll = (over / 66.0 * 1000.0) as u64;
+        assert!(roll_offset(travel, room, 66.0, SHADE_ROLL_REST_MS + roll) >= over - 0.01, "the end shows");
+        assert!(roll_offset(travel, room, 66.0, SHADE_ROLL_REST_MS + roll + SHADE_ROLL_REST_MS + roll) <= 0.01, "and it comes back");
+        // A name that fits does not move at all.
+        assert_eq!(roll_offset(room, room, 66.0, 5000), 0.0);
+        assert_eq!(roll_offset(room - 1.0, room, 66.0, 5000), 0.0);
     }
 }

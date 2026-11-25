@@ -2648,7 +2648,7 @@ pub fn check_circle(c: &mut Canvas, t: &Theme, cx: f32, cy: f32, on: bool) {
 
 /// The largest size, from `most` down to `least`, at which `text` fits in
 /// `room`.
-fn fitted_px(c: &Canvas, face: &Face, text: &str, most: f32, least: f32, room: f32) -> f32 {
+pub(crate) fn fitted_px(c: &Canvas, face: &Face, text: &str, most: f32, least: f32, room: f32) -> f32 {
     let w = c.text_width(face, text, most);
     if w <= room {
         most

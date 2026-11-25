@@ -1838,7 +1838,15 @@ impl<'a> Pages<'a> {
                 // The power key held past its wait for volume down turns
                 // the screen off.
                 Effect::Ticks => self.ticks()?,
-                other => unreachable!("time passing asks for nothing but the motor, not {other:?}"),
+                // A page may ask for more as time passes -- the screenshot the
+                // control centre's tile waits for the sheet to leave -- and
+                // that goes the way a page's own effect does.
+                other => {
+                    let mut queue = VecDeque::from(self.effect(other, now)?);
+                    while let Some(next) = queue.pop_front() {
+                        queue.extend(self.effect(next, now)?);
+                    }
+                }
             }
         }
         let unix = unix_now()?;
@@ -1848,6 +1856,9 @@ impl<'a> Pages<'a> {
             self.shown_clock = time;
             self.app.redraw();
         }
+        // The lock screen and the control centre show the date under the
+        // time, which turns once a day.
+        self.app.set_date(skyward_ui::fmt::date(self.app.state.lang, unix, self.app.state.zone()));
         Ok(())
     }
 

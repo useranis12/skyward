@@ -31,6 +31,29 @@ impl App {
         if self.lock.is_some() {
             return self.lock_touch(ev, now);
         }
+        // The control centre takes every finger while it is out or being
+        // pulled; the lock keeps it shut.
+        let pulling = matches!(self.drag, Drag::Shade { .. });
+        if self.shade > 0.0 || pulling {
+            return self.shade_touch(ev, now);
+        }
+        // A finger that comes down near the top edge may be starting a pull,
+        // but a tap there is the page's -- the back arrow and the first rows
+        // are up there -- so the pull begins only once it has moved down.
+        match ev {
+            Touch::Down(_, y) if y <= self.theme().m.dp(40.0) => self.shade_from = Some(y),
+            Touch::Move(_, y) => {
+                if let Some(start) = self.shade_from
+                    && y - start > self.theme().m.dp(12.0)
+                {
+                    self.shade_from = None;
+                    self.drag = Drag::Shade { start, from: 0.0 };
+                    return self.shade_touch(Touch::Move(0.0, y), now);
+                }
+            }
+            Touch::Up => self.shade_from = None,
+            _ => {}
+        }
         // A finger on the charging screen sends it away for the page, and
         // does nothing else until it lifts.
         if self.charge_shown() {
@@ -219,6 +242,9 @@ impl App {
                     self.tracker.add(now, y);
                     self.drag = self.scroll_history(last, y, carry, pitch);
                 }
+                // The sheet is pulled by its own handler, which sees every
+                // finger while it is out.
+                Drag::Shade { start, from } => self.drag = Drag::Shade { start, from },
                 Drag::Waking => self.drag = Drag::Waking,
                 Drag::Held => self.drag = Drag::Held,
                 Drag::Idle => {}
@@ -567,6 +593,167 @@ impl App {
                 Vec::new()
             }
         }
+    }
+
+    /// A finger on the control centre, or one pulling it down from the top.
+    fn shade_touch(&mut self, ev: Touch, now: u64) -> Vec<Effect> {
+        let t = self.theme();
+        match ev {
+            Touch::Down(x, y) => {
+                // A new finger starts the sheet afresh: nothing of the last
+                // pull's inertia carries into it.
+                self.shade_settle = None;
+                self.shade_speed = 0.0;
+                self.shade_last = None;
+                // A finger anywhere the sheet does not reach puts it away:
+                // the page under it was being touched, not the sheet.
+                let sheet = t.m.dp(SHADE_HEIGHT_DP) * self.shade;
+                if self.shade > 0.0 && y > sheet {
+                    self.close_shade();
+                    self.drag = Drag::Idle;
+                    return Vec::new();
+                }
+                if self.shade > 0.0
+                    && let Some((rect, hit)) = self.shade_hits.iter().find(|(r, _)| r.contains(x, y)).copied()
+                {
+                    match hit {
+                        ShadeHit::Brightness | ShadeHit::Vibration => {
+                            let which = if hit == ShadeHit::Brightness { Slider::Brightness } else { Slider::Vibration };
+                            self.shade_slider(which, rect, x);
+                            self.drag = Drag::Slider(which, rect);
+                        }
+                        _ => self.shade_press = Some((hit, y)),
+                    }
+                    return Vec::new();
+                }
+                self.drag = Drag::Shade { start: y, from: self.shade };
+                Vec::new()
+            }
+            Touch::Move(x, y) => {
+                if let Drag::Slider(which, track) = self.drag {
+                    self.shade_slider(which, track, x);
+                    return Vec::new();
+                }
+                // A finger that came down on a tile and then moved was pulling
+                // the sheet: the tile is not pressed after all.
+                if let Some((_, down)) = self.shade_press
+                    && (y - down).abs() > t.m.dp(14.0)
+                {
+                    self.shade_press = None;
+                    self.drag = Drag::Shade { start: down, from: self.shade };
+                }
+                if let Drag::Shade { start, from } = self.drag {
+                    let pulled = from * SHADE_PULL_DP + (y - start);
+                    let eased = if pulled > 0.0 { pulled * (1.0 - 0.22 * (pulled / SHADE_PULL_DP).min(1.0)) } else { pulled };
+                    self.shade = (eased / SHADE_PULL_DP).clamp(0.0, 1.0);
+                    if let Some((was_at, was_y)) = self.shade_last {
+                        let dt = now.saturating_sub(was_at) as f32 / 1000.0;
+                        if dt > 0.0005 {
+                            self.shade_speed = self.shade_speed * 0.55 + ((y - was_y) / dt) * 0.45;
+                        }
+                    }
+                    self.shade_last = Some((now, y));
+                    self.shade_settle = None;
+                    self.dirty = true;
+                }
+                Vec::new()
+            }
+            Touch::Up => {
+                let mut fx = Vec::new();
+                if let Some((hit, _)) = self.shade_press.take() {
+                    match hit {
+                        ShadeHit::Wlan => {
+                            let on = self.state.wlan.as_ref().is_some_and(|w| w.power == Power::On);
+                            fx.push(Effect::Wlan(!on));
+                        }
+                        ShadeHit::Vibrate => fx.extend(self.act(Action::Toggle(Switch::Vibrate), now)),
+                        ShadeHit::Transfer => fx.extend(self.act(Action::Toggle(Switch::FileTransfer), now)),
+                        ShadeHit::UsbDrive => {
+                            self.close_shade();
+                            fx.extend(self.act(Action::FilesOtg, now));
+                        }
+                        ShadeHit::Files => {
+                            self.close_shade();
+                            fx.extend(self.act(Action::Open(Screen::Files), now));
+                        }
+                        ShadeHit::Modules => {
+                            self.close_shade();
+                            fx.extend(self.act(Action::Open(Screen::Modules), now));
+                        }
+                        ShadeHit::Partitions => {
+                            self.close_shade();
+                            fx.extend(self.act(Action::Open(Screen::Partitions), now));
+                        }
+                        ShadeHit::Terminal => {
+                            self.close_shade();
+                            fx.extend(self.act(Action::Open(Screen::Terminal), now));
+                        }
+                        ShadeHit::Screenshot => {
+                            self.close_shade();
+                            self.shot_when = Some(now + 130);
+                        }
+                        ShadeHit::Reboot => {
+                            self.close_shade();
+                            fx.extend(self.act(Action::Open(Screen::Reboot), now));
+                        }
+                        ShadeHit::Settings => {
+                            self.close_shade();
+                            fx.extend(self.act(Action::Open(Screen::Settings), now));
+                        }
+                        ShadeHit::Sleep => {
+                            self.close_shade();
+                            self.sleep(now);
+                        }
+                        ShadeHit::Brightness | ShadeHit::Vibration => {}
+                    }
+                    return fx;
+                }
+                if matches!(self.drag, Drag::Slider(..)) {
+                    self.drag = Drag::Idle;
+                }
+                if matches!(self.drag, Drag::Shade { .. }) {
+                    let dragged = self.shade_last.is_some();
+                    self.drag = Drag::Idle;
+                    // Let go, it carries on a little the way it was going, so a
+                    // flick opens it and a slow drag settles where it got to.
+                    let heading = match dragged {
+                        true => self.shade + self.shade_speed / 1400.0,
+                        false => self.shade,
+                    };
+                    let target = if heading >= SHADE_KEEPS { SHADE_PULL_DP } else { 0.0 };
+                    let already = self.shade_settle.is_some_and(|(_, _, _, _, heading)| heading == target);
+                    if !already {
+                        let from = self.shade * SHADE_PULL_DP - target;
+                        let speed = self.shade_speed.clamp(-2600.0, 2600.0);
+                        self.shade_settle = Some((now, from, speed, SHADE_PERIOD, target));
+                    }
+                    self.shade_last = None;
+                    self.shade_speed = 0.0;
+                }
+                fx
+            }
+        }
+    }
+
+    /// Set one of the sheet's sliders from where a finger is.
+    fn shade_slider(&mut self, which: Slider, track: Rect, x: f32) {
+        let level = ((x - track.x) / track.w).clamp(0.0, 1.0);
+        match which {
+            Slider::Brightness => self.state.brightness = level.max(MIN_BRIGHTNESS),
+            // The sheet holds the two above; the charge page's sliders are
+            // moved by the charge page.
+            _ => self.state.vibration = level,
+        }
+        self.dirty = true;
+    }
+
+    /// Shut the control centre at once, for a toggle that opens a page.
+    fn close_shade(&mut self) {
+        self.shade = 0.0;
+        self.shade_settle = None;
+        self.shade_last = None;
+        self.shade_speed = 0.0;
+        self.dirty = true;
     }
 
     /// A button came back up: the power key works the control it went down
