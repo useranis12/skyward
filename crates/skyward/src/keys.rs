@@ -8,8 +8,9 @@ use anyhow::{Context, Result};
 use skyward_config::Service;
 use skyward_programs::naming::{self, Does};
 use skyward_programs::phone::{self, Partition, Phone, PARTITIONS};
-use skyward_programs::secure::{self, Step};
-use std::path::Path;
+use skyward_programs::secure::{self, Driver, Step};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// What the partitions of an installed system say that the recovery acts
 /// on.
@@ -97,10 +98,31 @@ pub fn serves_elements(steps: &[Step]) -> bool {
     steps.contains(&Step::ServeElements)
 }
 
+/// How long a driver may take to have its node made once its module is
+/// loaded: it makes its device as it takes its chip up, and ueventd makes
+/// the node once the kernel has told it of the device.
+const NODE_MADE: Duration = Duration::from_secs(5);
+
+/// Load the module of `driver` from the first of the `modules` folders
+/// that has it, wait for the node it makes, and give the node the owner
+/// and permissions the phone's own rules give it, which the secure
+/// element's service opens it by.
+fn drive(driver: &Driver, modules: &[PathBuf]) -> Result<()> {
+    for path in skyward_modules::load(modules, &[driver.module.to_string()])? {
+        skyward_sys::kmsg(&format!("loaded {}", path.display()))?;
+    }
+    skyward_sys::wait_file(Path::new(driver.node), NODE_MADE).with_context(|| format!("wait for the node {} makes", driver.module))?;
+    skyward_sys::ueventd::apply_to(driver.node)?;
+    skyward_sys::kmsg(&format!("{} is given the owner its phone describes", driver.node))
+}
+
 /// Do `steps` in order: start each program and wait until it is ready,
 /// and serve the secure element service where it stands among them, which
 /// is after the secure elements' own services have registered and before
-/// the weaver that reaches its secure element through it starts.
+/// the weaver that reaches its secure element through it starts, and load
+/// the driver of the chip a secure element is in where one stands among
+/// them, from the `modules` folders. Each program names every folder its
+/// libraries are looked for in.
 ///
 /// The programs that settle how fast a charge may run are among the last.
 /// Which of them are started is the step the charge page kept, decided here
@@ -108,7 +130,12 @@ pub fn serves_elements(steps: &[Step]) -> bool {
 /// tells the kernel of a charge cannot be taken back while the cable is in,
 /// so one that runs even for a moment leaves the charge as fast as it would
 /// have been. Gives how many of them were started.
-pub fn start(steps: &[Step], libraries: Option<&Path>, mode: skyward_ui::app::ChargeMode) -> Result<usize> {
+pub fn start(
+    steps: &[Step],
+    libraries: Option<&Path>,
+    mode: skyward_ui::app::ChargeMode,
+    modules: &[PathBuf],
+) -> Result<usize> {
     let mut started = 0;
     for step in steps {
         match step {
@@ -136,6 +163,7 @@ pub fn start(steps: &[Step], libraries: Option<&Path>, mode: skyward_ui::app::Ch
                     started += 1;
                 }
             }
+            Step::Drive(driver) => drive(driver, modules)?,
             Step::ServeElements => {
                 let readers = skyward_omapi::start()?;
                 skyward_sys::kmsg(&format!("{} is served, with a reader for each of {} secure elements: {}", skyward_omapi::SERVICE, readers.len(), readers.join(", ")))?;
@@ -158,9 +186,16 @@ pub fn settles_the_charge(path: &str) -> bool {
 pub fn describe(steps: &[Step]) -> Vec<String> {
     let mut lines = Vec::new();
     for step in steps {
-        let Step::Start(program) = step else {
-            lines.push(format!("serve {}", skyward_omapi::SERVICE));
-            continue;
+        let program = match step {
+            Step::Start(program) => program,
+            Step::Drive(driver) => {
+                lines.push(format!("load {}, which makes {}", driver.module, driver.node));
+                continue;
+            }
+            Step::ServeElements => {
+                lines.push(format!("serve {}", skyward_omapi::SERVICE));
+                continue;
+            }
         };
         let s = &program.service;
         let mut line = format!("start {}", s.path);

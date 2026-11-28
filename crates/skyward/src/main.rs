@@ -316,10 +316,16 @@ fn main() -> Result<()> {
         Cmd::Services { config } => {
             let slot = booted_slot()?;
             let props = skyward_info::installed_props(slot)?;
-            let services: Vec<Started> = DeviceConfig::load(&config)?.services.into_iter().filter(|s| s.runs_on(&props)).map(Started::from).collect();
+            let cfg = DeviceConfig::load(&config)?;
+            let services: Vec<Started> = cfg.services.iter().filter(|s| s.runs_on(&props)).cloned().map(Started::from).collect();
             let libraries = secure::libraries()?;
             services::start(&services, libraries.as_deref())?;
-            keys::start(&keys::found(slot, libraries.as_deref())?.steps?, libraries.as_deref(), skyward_ui::app::ChargeMode::default())?;
+            keys::start(
+                &keys::found(slot, libraries.as_deref())?.steps?,
+                libraries.as_deref(),
+                skyward_ui::app::ChargeMode::default(),
+                &module_folders(&cfg)?,
+            )?;
             loop {
                 std::thread::park();
             }
@@ -528,10 +534,15 @@ fn lp(super_dev: &Path, slot: Option<u32>) -> Result<()> {
     Ok(())
 }
 
+/// The folders of the module sources the configuration lists, in the
+/// order a module is looked for in them.
+fn module_folders(cfg: &DeviceConfig) -> Result<Vec<PathBuf>> {
+    cfg.modules.sources.iter().map(|s| skyward_modules::source_dir(s)).collect()
+}
+
 /// Load `names` from the module sources the configuration lists.
 fn load_modules(cfg: &DeviceConfig, names: &[String]) -> Result<Vec<PathBuf>> {
-    let dirs = cfg.modules.sources.iter().map(|s| skyward_modules::source_dir(s)).collect::<Result<Vec<_>>>()?;
-    skyward_modules::load(&dirs, names)
+    skyward_modules::load(&module_folders(cfg)?, names)
 }
 
 /// Start the recovery's own logd where it needs libraries of the installed
@@ -680,7 +691,7 @@ fn bring_up(cfg: &DeviceConfig, slot: skyward_vab::Slot, found: Result<keys::Fou
     // recovery starts again. The page says so, which is why it says the step
     // reaches the phone at the next start.
     let mode = charging_mode();
-    let started = keys::start(&steps, libraries.as_deref(), mode)?;
+    let started = keys::start(&steps, libraries.as_deref(), mode, &module_folders(cfg)?)?;
     skyward_sys::kmsg(&format!(
         "the charge step kept is {}: {started} program(s) of the phone's that settle it were started",
         mode.name()
@@ -689,10 +700,18 @@ fn bring_up(cfg: &DeviceConfig, slot: skyward_vab::Slot, found: Result<keys::Fou
     agree_on_the_notes_key(&registering)
 }
 
+/// How long a file handed over may take to be there once the modules are
+/// loaded: a driver makes its files as it takes its device up, and ueventd
+/// makes the device's node once the kernel has told it of the device,
+/// either of which may come after the load of the module returns.
+#[cfg(target_os = "android")]
+const FILES_MADE: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Give each file the phone's own init hands over as it boots to the
 /// account it names, with the mode it gives, as its chown and chmod lines
-/// do. The files are the ones the modules just loaded made, which the
-/// phone's own programs open as those accounts.
+/// do. The files are the ones the modules just loaded make, which the
+/// phone's own programs open as those accounts; one not there yet is
+/// waited for.
 #[cfg(target_os = "android")]
 fn hand_over(owners: &[skyward_config::Owners]) -> Result<usize> {
     use skyward_sys::ueventd;
@@ -703,6 +722,7 @@ fn hand_over(owners: &[skyward_config::Owners]) -> Result<usize> {
     for run in owners {
         let (uid, gid) = (id(&run.user)?, id(&run.group)?);
         for path in &run.paths {
+            skyward_sys::wait_file(Path::new(path), FILES_MADE).context("wait for a file the modules just loaded make")?;
             std::os::unix::fs::chown(path, Some(uid), Some(gid)).with_context(|| format!("give {path} to {}:{}", run.user, run.group))?;
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(run.mode))
                 .with_context(|| format!("give {path} the mode {:o}", run.mode))?;
@@ -729,12 +749,7 @@ const LOGD_READY: std::time::Duration = std::time::Duration::from_secs(5);
 #[cfg(target_os = "android")]
 fn start_logd(logd: &skyward_config::Logd) -> Result<()> {
     for library in &logd.libraries {
-        let from = Path::new(library);
-        let to = Path::new(RECOVERY_LIBRARIES).join(from.file_name().expect("the configuration names each library's file"));
-        let mut part = to.clone().into_os_string();
-        part.push(".part");
-        std::fs::copy(from, &part).with_context(|| format!("copy {library} to {}", Path::new(&part).display()))?;
-        std::fs::rename(&part, &to).with_context(|| format!("put {} in place", to.display()))?;
+        services::place(Path::new(library), Path::new(RECOVERY_LIBRARIES))?;
     }
     skyward_sys::set_prop("ctl.start", "logd")?;
     skyward_sys::wait_prop("logd.ready", "true", LOGD_READY)?;
